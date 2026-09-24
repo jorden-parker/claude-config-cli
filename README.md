@@ -59,12 +59,13 @@ ccfg -C ~/repo                  # another project
 Global-config keys (`~/.claude.json`) always write there, whatever the target.
 Managed settings are shown read-only.
 
-The **Tools** pane lists Claude Code tools such as `NotebookEdit`, `Bash`,
-and `Read`. Press `→` to focus Tools and `←` to return to Settings. Each pane
+The **Tools** view lists Claude Code tools such as `NotebookEdit`, `Bash`,
+and `Read`. Settings and Tools share one column, with only one visible at a time.
+Press `→` to show Tools and `←` to return to Settings. Each list
 keeps its own selection and filter. In Tools, filter with `/NotebookEdit`, then
 press `tab` (or `enter`) to toggle the tool in the selected target file.
 The details pane follows the focused list; `pgup` / `pgdn` scroll its contents.
-On narrower terminals, Settings and Tools stack beside the details pane.
+The details pane stays beside the selected list at every terminal width.
 
 Disabling adds the tool's bare name to `permissions.deny`; enabling removes that
 exact entry. Normal permission prompts, scoped rules, and denies in other files

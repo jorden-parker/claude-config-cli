@@ -501,36 +501,21 @@ func (m *model) jumpSection(forward bool) {
 
 func (m *model) setStatus(s string, isErr bool) { m.status, m.statusErr = s, isErr }
 
-// On smaller terminals the two lists stack beside the shared details pane.
+// Settings and Tools share the left column; only the active list is rendered.
 func (m *model) listWidth() int {
-	if m.width >= 120 {
-		return m.width * 3 / 10
-	}
-	return max(24, m.width*2/5)
-}
-
-func (m *model) paneSizes() (settingsWidth, toolsWidth, settingsHeight, toolsHeight int) {
-	h := max(12, m.height-3)
-	sw := m.listWidth()
-	if m.width >= 120 {
-		return sw, m.width / 4, h, h
-	}
-	return sw, sw, h / 2, h - h/2
+	return min(64, max(24, m.width*2/5))
 }
 
 func (m *model) layout() {
 	if m.width == 0 {
 		return
 	}
-	sw, tw, sh, th := m.paneSizes()
-	m.list.SetSize(sw-4, sh-2)
-	m.tools.SetSize(tw-4, th-2)
-	dw := m.width - sw
-	if m.width >= 120 {
-		dw -= tw
-	}
-	m.doc.SetWidth(max(1, dw-4))
-	m.doc.SetHeight(max(1, m.height-5))
+	lw := m.listWidth()
+	h := max(1, m.height-5)
+	m.list.SetSize(lw-4, h)
+	m.tools.SetSize(lw-4, h)
+	m.doc.SetWidth(max(1, m.width-lw-4))
+	m.doc.SetHeight(h)
 	m.refreshDoc()
 }
 
@@ -610,20 +595,9 @@ func (m *model) View() tea.View {
 		strings.Join(badges, ""),
 	)
 
-	sw, tw, sh, th := m.paneSizes()
-	settingsStyle, toolsStyle := m.st.paneFocus, m.st.pane
-	if m.toolsFocus {
-		settingsStyle, toolsStyle = m.st.pane, m.st.paneFocus
-	}
-	left := settingsStyle.Width(sw).Height(sh).Render(m.list.View())
-	toolsPane := toolsStyle.Width(tw).Height(th).Render(m.tools.View())
+	left := m.st.paneFocus.Width(m.listWidth()).Height(m.height - 3).Render(m.activeList().View())
 	right := m.st.pane.Width(m.doc.Width() + 4).Height(m.height - 3).Render(m.doc.View())
-	var body string
-	if m.width >= 120 {
-		body = lipgloss.JoinHorizontal(lipgloss.Top, left, toolsPane, right)
-	} else {
-		body = lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.JoinVertical(lipgloss.Left, left, toolsPane), right)
-	}
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
 	helpText := "←/→ pane · tab toggle · enter edit · / filter · r reload · q quit"
 	if m.width >= 140 {

@@ -62,7 +62,7 @@ func TestTabLeavesMultiValueSettingsAlone(t *testing.T) {
 	}
 }
 
-func TestSeparatePanesAndPersistentReloadHelp(t *testing.T) {
+func TestSharedListColumnAndPersistentReloadHelp(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	m := newModel(t.TempDir())
 	for _, it := range m.list.Items() {
@@ -89,11 +89,20 @@ func TestSeparatePanesAndPersistentReloadHelp(t *testing.T) {
 		m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
 		m.Update(tea.KeyPressMsg{Code: 'r'})
 		view := m.View().Content
-		for _, text := range []string{"Settings", "Tools", "reloaded settings files", "←/→ pane", "tab toggle", "r reload", "q quit"} {
+		for _, text := range []string{"Tools", "reloaded settings files", "←/→ pane", "tab toggle", "r reload", "q quit"} {
 			if !strings.Contains(view, text) {
 				t.Fatalf("width %d: missing %q", width, text)
 			}
 		}
+		if strings.Contains(view, "effortLevel") || strings.Contains(view, "Settings") {
+			t.Fatalf("width %d: settings visible while tools selected", width)
+		}
+		m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+		settingsView := m.View().Content
+		if !strings.Contains(settingsView, "effortLevel") || strings.Contains(settingsView, "NotebookEdit") {
+			t.Fatalf("width %d: switching did not replace the visible list", width)
+		}
+		m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 		if h := lipgloss.Height(view); h > 40 {
 			t.Fatalf("width %d: height = %d; list %dx%d tools %dx%d doc %dx%d\n%s", width, h, lipgloss.Width(m.list.View()), lipgloss.Height(m.list.View()), lipgloss.Width(m.tools.View()), lipgloss.Height(m.tools.View()), lipgloss.Width(m.doc.View()), lipgloss.Height(m.doc.View()), view)
 		}
