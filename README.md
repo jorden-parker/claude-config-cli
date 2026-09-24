@@ -42,20 +42,28 @@ ccfg                            # in a project directory
 ccfg -C ~/repo                  # another project
 ```
 
-| Key     | Action                                       |
-| ------- | -------------------------------------------- |
-| `enter` | edit the highlighted setting                 |
-| `tab`   | single-value setting: set the next option    |
-| `u`     | remove it from the target file               |
-| `s`     | switch the target file: user, project, local |
-| `/`     | filter by key or section                     |
-| `[` `]` | jump between sections                        |
-| `o`     | open the docs page for the key               |
-| `r`     | reload the settings files                    |
-| `q`     | quit                                         |
+| Key     | Action                                         |
+| ------- | ---------------------------------------------- |
+| `enter` | edit the highlighted setting                   |
+| `tab`   | next setting option / enable or disable a tool |
+| `u`     | remove it from the target file                 |
+| `s`     | switch the target file: user, project, local   |
+| `/`     | filter by key or section                       |
+| `[` `]` | jump between sections                          |
+| `o`     | open the docs page for the key                 |
+| `r`     | reload the settings files                      |
+| `q`     | quit                                           |
 
 Global-config keys (`~/.claude.json`) always write there, whatever the target.
 Managed settings are shown read-only.
+
+The **Tools** section lists Claude Code tools such as `NotebookEdit`, `Bash`,
+and `Read`. Filter with `/NotebookEdit`, then press `tab` (or `enter`) to toggle
+that tool in the selected target file. Disabling adds its bare name to
+`permissions.deny`; enabling removes that exact entry. Normal permission prompts,
+scoped rules, and denies in other files still apply. The details pane shows which
+files disable the tool. Tool availability depends on your Claude Code version
+and session; the catalogue comes from the [tools reference](https://code.claude.com/docs/en/tools-reference).
 
 Editors per value kind:
 

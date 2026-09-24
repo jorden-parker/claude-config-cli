@@ -111,6 +111,10 @@ func (m *model) items() []list.Item {
 		st := &m.sch.Settings[i]
 		out = append(out, item{st: st, desc: m.summary(st)})
 	}
+	for i := range toolSettings {
+		st := &toolSettings[i]
+		out = append(out, item{st: st, desc: m.toolSummary(st)})
+	}
 	return out
 }
 
@@ -203,6 +207,10 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.cycleValue()
 		case key.Matches(k, keys.unset):
 			st := m.selected()
+			if toolName(st) != "" {
+				m.setStatus("Press tab to enable or disable this tool in the target file", false)
+				return m, nil
+			}
 			if st == nil {
 				return m, nil
 			}
@@ -215,12 +223,15 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(k, keys.scope):
 			m.cycleScope()
-			m.refreshDoc()
-			return m, nil
+			return m, m.afterWrite()
 		case key.Matches(k, keys.docs):
 			if st := m.selected(); st != nil {
-				openURL(st.DocURL())
-				m.setStatus("opened "+st.DocURL(), false)
+				url := st.DocURL()
+				if toolName(st) != "" {
+					url = "https://code.claude.com/docs/en/tools-reference"
+				}
+				openURL(url)
+				m.setStatus("opened "+url, false)
 			}
 			return m, nil
 		case key.Matches(k, keys.reload):
@@ -291,6 +302,9 @@ func (m *model) startEdit() tea.Cmd {
 	if st == nil {
 		return nil
 	}
+	if toolName(st) != "" {
+		return m.toggleTool(st)
+	}
 	sc := m.targetScope(st)
 	if !store.Allowed(st, sc) {
 		m.setStatus(fmt.Sprintf("%s isn't read from %s settings (docs: %s). Press s to change the target file.", st.Key, sc, st.Scope), true)
@@ -309,6 +323,9 @@ func (m *model) cycleValue() tea.Cmd {
 	st := m.selected()
 	if st == nil {
 		return nil
+	}
+	if toolName(st) != "" {
+		return m.toggleTool(st)
 	}
 	var opts []string
 	switch st.Kind {
@@ -454,6 +471,12 @@ func (m *model) refreshDoc() {
 		m.doc.SetContent("")
 		return
 	}
+	if toolName(st) != "" {
+		m.doc.SetContent(m.toolDoc(st))
+		m.doc.GotoTop()
+		return
+	}
+
 	w := m.doc.Width()
 	if w < 20 {
 		w = 60
@@ -524,7 +547,7 @@ func (m *model) View() tea.View {
 	right := m.st.pane.Height(h - 2).Render(m.doc.View())
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
-	status := m.st.help.Render("enter edit · tab next value · u unset · s target file · [ ] section · / filter · o docs · r reload · q quit")
+	status := m.st.help.Render("enter edit · tab next value / toggle tool · u unset · s target file · [ ] section · / filter · o docs · r reload · q quit")
 	if m.mode == modeConfirmUnset {
 		if st := m.selected(); st != nil {
 			status = m.st.warn.Render(fmt.Sprintf("Remove %s from %s? (y/n)", st.Key, m.targetScope(st)))
