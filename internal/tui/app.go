@@ -513,7 +513,7 @@ func (m *model) View() tea.View {
 		}
 	}
 	header := lipgloss.JoinHorizontal(lipgloss.Center,
-		m.st.title.Render(" claude-config "),
+		m.st.title.Render(" claude-config-cli "),
 		m.st.subtle.Render(" write to: "),
 		strings.Join(badges, ""),
 	)

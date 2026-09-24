@@ -1,4 +1,4 @@
-# claude-config
+# claude-config-cli
 
 A terminal UI and CLI for every Claude Code setting, built with the
 [Charm](https://charm.land/) libraries (Bubble Tea, Bubbles, Lip Gloss, Huh, Fang).
@@ -11,20 +11,30 @@ file the docs say Claude Code won't read it from.
 ## Install
 
 ```sh
-go install github.com/jorden-parker/claude-config-cli/cmd/claude-config@latest
+go install github.com/jorden-parker/claude-config-cli@latest
 ```
+
+For the short name `ccfg`, also install:
+
+```sh
+go install github.com/jorden-parker/claude-config-cli/cmd/ccfg@latest
+```
+
+Both run the same commands. The examples below use the short name; swap in
+`claude-config-cli` if you only installed that.
 
 Or build locally:
 
 ```sh
-go build ./cmd/claude-config
+go build .            # claude-config-cli
+go build ./cmd/ccfg   # ccfg
 ```
 
 ## Interactive editor
 
 ```sh
-claude-config            # in a project directory
-claude-config -C ~/repo  # another project
+ccfg                            # in a project directory
+ccfg -C ~/repo                  # another project
 ```
 
 | Key         | Action                                       |
@@ -55,20 +65,20 @@ Editors per value kind:
 ## CLI
 
 ```sh
-claude-config list                       # every key, grouped by section
-claude-config list -q sandbox            # filter
-claude-config list sections
-claude-config doc permissions.defaultMode
-claude-config get model                  # value in every file
-claude-config set effortLevel high       # writes ~/.claude/settings.json
-claude-config set theme light -s project
-claude-config set permissions.allow 'Bash(npm run *),Read(./.env)' -s local
-claude-config set env 'FOO=bar' -s project
-echo '{"type":"command","command":"~/bin/status.sh"}' | claude-config set statusLine
-claude-config unset theme -s project
-claude-config show -s user
-claude-config paths
-claude-config env CLAUDE_CODE_            # documented environment variables
+ccfg ls                         # every key, grouped by section (alias of list)
+ccfg ls -q sandbox              # filter
+ccfg ls sections
+ccfg doc permissions.defaultMode
+ccfg get model                  # value in every file
+ccfg set effortLevel high       # writes ~/.claude/settings.json
+ccfg set theme light -s project
+ccfg set permissions.allow 'Bash(npm run *),Read(./.env)' -s local
+ccfg set env 'FOO=bar' -s project
+echo '{"type":"command","command":"~/bin/status.sh"}' | ccfg set statusLine
+ccfg rm theme -s project        # alias of unset
+ccfg show -s user
+ccfg paths
+ccfg env CLAUDE_CODE_           # documented environment variables
 ```
 
 Scopes: `user` (default), `project`, `local`, `global`.

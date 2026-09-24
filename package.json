@@ -1,5 +1,5 @@
 {
-  "name": "claude-config",
+  "name": "claude-config-cli",
   "private": true,
   "scripts": {
     "prepare": "husky",

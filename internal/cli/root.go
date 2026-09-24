@@ -1,12 +1,14 @@
-// Package cli defines the claude-config commands.
+// Package cli defines the claude-config-cli commands.
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 
+	"github.com/charmbracelet/fang"
 	"github.com/spf13/cobra"
 
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
@@ -18,7 +20,18 @@ import (
 var (
 	flagScope string
 	flagDir   string
+	name      = "claude-config-cli"
 )
+
+// Main runs the command under the given program name and exits non-zero on
+// error. The name shows in help and error text, so the short ccfg binary
+// tells users to type ccfg.
+func Main(program, version string) {
+	name = program
+	if err := fang.Execute(context.Background(), Root(), fang.WithVersion(version)); err != nil {
+		os.Exit(1)
+	}
+}
 
 func cwd() string {
 	if flagDir != "" {
@@ -31,9 +44,10 @@ func cwd() string {
 // Root returns the root command.
 func Root() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "claude-config",
+		Use:   name,
 		Short: "Browse and edit every Claude Code setting",
-		Long: `claude-config is a terminal UI and CLI for Claude Code's settings files.
+		Long: name + ` is a terminal UI and CLI for Claude Code's settings files.
+ccfg is its short name; both run the same commands.
 
 Every key, its allowed values, and its default come from the official
 settings reference: https://code.claude.com/docs/en/settings-reference
@@ -54,8 +68,9 @@ func listCmd() *cobra.Command {
 	var section, search string
 	var showAll bool
 	c := &cobra.Command{
-		Use:   "list",
-		Short: "List settings keys, optionally filtered by section or text",
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List settings keys, optionally filtered by section or text",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s := schema.Load()
 			var items []*schema.Setting
@@ -139,7 +154,7 @@ func setCmd() *cobra.Command {
 		Short: "Set a setting in one file (default: user settings)",
 		Long: `Set a setting. VALUE forms per kind:
   bool          true | false
-  enum          one of the documented options (see: claude-config doc KEY)
+  enum          one of the documented options (see: ` + name + ` doc KEY)
   number        123 or 0.5
   array         JSON array, or comma-separated items
   map           JSON object, or KEY=VALUE (use --stdin for several lines)
@@ -197,9 +212,10 @@ func setCmd() *cobra.Command {
 
 func unsetCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "unset KEY",
-		Short: "Remove a setting from one file (default: user settings)",
-		Args:  cobra.ExactArgs(1),
+		Use:     "unset KEY",
+		Aliases: []string{"rm"},
+		Short:   "Remove a setting from one file (default: user settings)",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key := args[0]
 			st := schema.Load().Get(key)
@@ -335,7 +351,7 @@ func unknownKey(key string) error {
 	if len(near) > 0 {
 		return fmt.Errorf("unknown setting %q. Did you mean: %s", key, strings.Join(near, ", "))
 	}
-	return fmt.Errorf("unknown setting %q. Run `claude-config list` to see every key", key)
+	return fmt.Errorf("unknown setting %q. Run `%s ls` to see every key", key, name)
 }
 
 func readStdin() (string, error) {
