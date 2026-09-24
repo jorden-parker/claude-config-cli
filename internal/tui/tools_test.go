@@ -68,7 +68,7 @@ func TestToolToggleUsesTargetAndShowsInheritedDeny(t *testing.T) {
 	if !regexp.MustCompile(`managed\s+disabled`).MatchString(ansi.Strip(m.toolDoc(m.selected(), 80))) {
 		t.Fatal("managed deny hidden")
 	}
-	if it := m.tools.SelectedItem().(item); !it.off || it.scope != "managed" {
+	if it := m.list.SelectedItem().(item); !it.off || it.scope != "managed" {
 		t.Fatalf("row does not show the managed deny: %+v", it)
 	}
 	if got, _ := toolRules(m.files[store.ScopeManaged]); !reflect.DeepEqual(got, []string{"NotebookEdit"}) {

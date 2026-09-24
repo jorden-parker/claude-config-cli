@@ -110,12 +110,21 @@ func docHead(s styles, st *schema.Setting) string {
 }
 
 func docBody(s styles, st *schema.Setting, width int) string {
+	return docDescription(s, st, width) + docMetadata(s, st, width)
+}
+
+func docDescription(s styles, st *schema.Setting, width int) string {
 	wrap := lipgloss.NewStyle().Width(width)
 	var b strings.Builder
 	if st.Deprecated != "" {
 		b.WriteString(s.warn.Render(wrap.Render("Removed: "+st.Deprecated)) + "\n\n")
 	}
-	b.WriteString(wrap.Render(st.Desc) + "\n\n")
+	b.WriteString(s.label.Render("What it does") + "\n" + wrap.Render(st.Desc) + "\n\n")
+	return b.String()
+}
+
+func docMetadata(s styles, st *schema.Setting, width int) string {
+	var b strings.Builder
 	rowWrap := lipgloss.NewStyle().Width(max(1, width-9))
 	row := func(k, v string) {
 		if v == "" {

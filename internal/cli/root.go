@@ -96,7 +96,7 @@ func listCmd() *cobra.Command {
 					cur = st.Section
 					fmt.Printf("\n%s\n", cur)
 				}
-				fmt.Printf("  %-46s %-15s %s\n", st.Key, st.Kind, truncate(st.Desc, 70))
+				fmt.Printf("  %s (%s)\n    %s\n\n", st.Key, st.Kind, strings.ReplaceAll(st.Desc, "\n", "\n    "))
 			}
 			return nil
 		},

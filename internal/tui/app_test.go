@@ -12,19 +12,10 @@ import (
 
 func selectKey(t *testing.T, m *model, key string) {
 	t.Helper()
-	m.toolsFocus = false
-	for _, st := range toolSettings {
-		if st.Key == key {
-			m.toolsFocus = true
-		}
+	m.reveal(key)
+	if st := m.selected(); st == nil || st.Key != key {
+		t.Fatalf("no setting %s", key)
 	}
-	for i, it := range m.activeList().Items() {
-		if it.(item).st.Key == key {
-			m.activeList().Select(i)
-			return
-		}
-	}
-	t.Fatalf("no setting %s", key)
 }
 
 func pressTab(m *model) { m.Update(tea.KeyPressMsg{Code: tea.KeyTab}) }
@@ -64,59 +55,51 @@ func TestTabLeavesMultiValueSettingsAlone(t *testing.T) {
 	}
 }
 
-func TestSharedListColumnAndPersistentReloadHelp(t *testing.T) {
+func TestEachSectionIsItsOwnPane(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	m := newModel(t.TempDir())
-	for _, it := range m.list.Items() {
-		if toolName(it.(item).st) != "" {
-			t.Fatal("tool in settings pane")
+	selectKey(t, m, "effortLevel")
+	for _, li := range m.list.Items() {
+		if it := li.(item); !it.header && it.st.Section != "Model and responses" {
+			t.Fatalf("%s from %s in the Model pane", it.st.Key, it.st.Section)
 		}
 	}
-	selectKey(t, m, "effortLevel")
-	m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
-	if !m.toolsFocus || toolName(m.selected()) == "" {
-		t.Fatal("right did not focus tools")
-	}
-	selectKey(t, m, "NotebookEdit")
-	pressTab(m)
 	m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
-	if m.selected().Key != "effortLevel" {
-		t.Fatal("settings selection lost")
+	if !m.sideFocus {
+		t.Fatal("left did not focus the sections")
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.section() != "Permission settings" || m.selected().Section != "Permission settings" {
+		t.Fatalf("down opened %s", m.section())
 	}
 	m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
-	if m.selected().Key != "NotebookEdit" {
-		t.Fatal("tool selection lost")
+	if m.sideFocus {
+		t.Fatal("right did not return to the keys")
 	}
+	m.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	if m.section() != "Sandbox settings" {
+		t.Fatalf("] opened %s", m.section())
+	}
+
+	selectKey(t, m, "NotebookEdit")
+	if m.section() != toolsSection {
+		t.Fatal("tools are not in the Tools pane")
+	}
+	pressTab(m)
 	for _, width := range []int{80, 119, 120, 160} {
 		m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
-		m.Update(tea.KeyPressMsg{Code: 'r'})
+		m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 		view := ansi.Strip(m.View().Content)
-		for _, text := range []string{"Tools 46", "Reloaded settings files", "tab turn on/off", "? all keys", "q quit"} {
+		for _, text := range []string{"Sections", "Model", "Sandbox", "Reloaded settings files", "tab turn on/off", "? all keys", "q quit"} {
 			if !strings.Contains(view, text) {
 				t.Fatalf("width %d: missing %q\n%s", width, text, view)
 			}
 		}
 		if strings.Contains(view, "effortLevel") {
-			t.Fatalf("width %d: settings rows visible while tools selected", width)
+			t.Fatalf("width %d: Model keys visible in the Tools pane", width)
 		}
-		m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
-		settingsView := ansi.Strip(m.View().Content)
-		if !strings.Contains(settingsView, "effortLevel") || regexp.MustCompile(`NotebookEdit\s+(on|off)`).MatchString(settingsView) {
-			t.Fatalf("width %d: switching did not replace the visible list", width)
-		}
-		for _, text := range []string{"enter edit", "tab next value", "? all keys"} {
-			if !strings.Contains(settingsView, text) {
-				t.Fatalf("width %d: settings footer missing %q\n%s", width, text, settingsView)
-			}
-		}
-		m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
-		for _, v := range []string{view, settingsView} {
-			if h := lipgloss.Height(v); h > 40 {
-				t.Fatalf("width %d: height = %d\n%s", width, h, v)
-			}
-			if w := lipgloss.Width(v); w > width {
-				t.Fatalf("width %d: rendered width = %d", width, w)
-			}
+		if h, w := lipgloss.Height(view), lipgloss.Width(view); h > 40 || w > width {
+			t.Fatalf("width %d: view is %dx%d\n%s", width, w, h, view)
 		}
 	}
 }
@@ -194,8 +177,9 @@ func TestEveryScreenFitsA24RowTerminal(t *testing.T) {
 		}
 	}
 	check("settings")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	check("sections focused")
 	m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
-	check("tools")
 	m.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
 	check("keys overlay")
 	m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
@@ -207,4 +191,82 @@ func TestEveryScreenFitsA24RowTerminal(t *testing.T) {
 	selectKey(t, m, "model")
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	check("edit")
+}
+
+func TestNestedKeysLiveInsideGroups(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := newModel(t.TempDir())
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	for _, li := range m.list.Items() {
+		if it := li.(item); !it.header && strings.Contains(it.st.Key, ".") {
+			t.Fatalf("nested key %s on the top level", it.st.Key)
+		}
+	}
+	if it, _ := m.selectedItem(); it.header {
+		t.Fatal("cursor starts on a section heading")
+	}
+	for i := 0; i < 40; i++ {
+		m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+		if it, _ := m.selectedItem(); it.header {
+			t.Fatal("cursor landed on a section heading")
+		}
+	}
+
+	selectKey(t, m, "permissions")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.levelPrefix() != "permissions" || m.mode != modeBrowse {
+		t.Fatalf("enter did not open permissions: path=%v mode=%v", m.path, m.mode)
+	}
+	view := ansi.Strip(m.View().Content)
+	if !strings.Contains(view, "Permissions › permissions") || strings.Contains(view, "permissions.allow") {
+		t.Fatalf("permissions level shows dotted keys or no breadcrumb\n%s", view)
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if len(m.path) != 0 || m.selected().Key != "permissions" {
+		t.Fatal("esc did not return to the permissions row")
+	}
+
+	// Sandbox holds only the sandbox group, so its pane opens it directly.
+	selectKey(t, m, "sandbox.enabled")
+	if len(m.path) != 0 {
+		t.Fatalf("sandbox pane not opened directly: path=%v", m.path)
+	}
+	selectKey(t, m, "sandbox.network.allowedDomains")
+	if m.levelPrefix() != "sandbox.network" {
+		t.Fatalf("path = %v", m.path)
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if m.levelPrefix() != "sandbox" || len(m.path) != 0 || m.selected().Key != "sandbox.network" {
+		t.Fatalf("left did not go back to the sandbox pane: path=%v", m.path)
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if !m.sideFocus {
+		t.Fatal("left at the top of a pane did not focus the sections")
+	}
+}
+
+func TestSearchFindsNestedKeys(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := newModel(t.TempDir())
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	if !m.searching {
+		t.Fatal("/ did not start a search")
+	}
+	found := false
+	for _, li := range m.list.Items() {
+		if li.(item).st.Key == "sandbox.network.allowedDomains" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("search set is missing nested keys")
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.searching {
+		t.Fatal("cancelling the search did not restore the level")
+	}
+	if it, _ := m.selectedItem(); it.header {
+		t.Fatal("cursor on heading after search")
+	}
 }
