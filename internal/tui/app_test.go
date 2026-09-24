@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"charm.land/lipgloss/v2"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -8,9 +10,15 @@ import (
 
 func selectKey(t *testing.T, m *model, key string) {
 	t.Helper()
-	for i, it := range m.list.Items() {
+	m.toolsFocus = false
+	for _, st := range toolSettings {
+		if st.Key == key {
+			m.toolsFocus = true
+		}
+	}
+	for i, it := range m.activeList().Items() {
 		if it.(item).st.Key == key {
-			m.list.Select(i)
+			m.activeList().Select(i)
 			return
 		}
 	}
@@ -51,5 +59,46 @@ func TestTabLeavesMultiValueSettingsAlone(t *testing.T) {
 	}
 	if m.scope != "user" {
 		t.Fatalf("tab changed the target file to %s", m.scope)
+	}
+}
+
+func TestSeparatePanesAndPersistentReloadHelp(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := newModel(t.TempDir())
+	for _, it := range m.list.Items() {
+		if toolName(it.(item).st) != "" {
+			t.Fatal("tool in settings pane")
+		}
+	}
+	selectKey(t, m, "effortLevel")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	if !m.toolsFocus || toolName(m.selected()) == "" {
+		t.Fatal("right did not focus tools")
+	}
+	selectKey(t, m, "NotebookEdit")
+	pressTab(m)
+	m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if m.selected().Key != "effortLevel" {
+		t.Fatal("settings selection lost")
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.selected().Key != "NotebookEdit" {
+		t.Fatal("tool selection lost")
+	}
+	for _, width := range []int{80, 119, 120, 160} {
+		m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+		m.Update(tea.KeyPressMsg{Code: 'r'})
+		view := m.View().Content
+		for _, text := range []string{"Settings", "Tools", "reloaded settings files", "←/→ pane", "tab toggle", "r reload", "q quit"} {
+			if !strings.Contains(view, text) {
+				t.Fatalf("width %d: missing %q", width, text)
+			}
+		}
+		if h := lipgloss.Height(view); h > 40 {
+			t.Fatalf("width %d: height = %d; list %dx%d tools %dx%d doc %dx%d\n%s", width, h, lipgloss.Width(m.list.View()), lipgloss.Height(m.list.View()), lipgloss.Width(m.tools.View()), lipgloss.Height(m.tools.View()), lipgloss.Width(m.doc.View()), lipgloss.Height(m.doc.View()), view)
+		}
+		if w := lipgloss.Width(view); w > width {
+			t.Fatalf("width %d: rendered width = %d", width, w)
+		}
 	}
 }

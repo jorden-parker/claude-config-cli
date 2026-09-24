@@ -50,7 +50,7 @@ var keys = keymap{
 	cycle:       key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next value")),
 	scope:       key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "target file")),
 	docs:        key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open docs")),
-	focus:       key.NewBinding(key.WithKeys("right", "left"), key.WithHelp("←/→", "scroll doc")),
+	focus:       key.NewBinding(key.WithKeys("right", "left"), key.WithHelp("←/→", "switch pane")),
 	quit:        key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	reload:      key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reload files")),
 	sectionNext: key.NewBinding(key.WithKeys("]"), key.WithHelp("[/]", "section")),
@@ -70,7 +70,8 @@ type model struct {
 	width, height int
 	list          list.Model
 	doc           viewport.Model
-	docFocus      bool
+	toolsFocus    bool
+	tools         list.Model
 	edit          *editState
 	status        string
 	statusErr     bool
@@ -90,11 +91,17 @@ func newModel(cwd string) *model {
 	del := list.NewDefaultDelegate()
 	del.Styles = list.NewDefaultItemStyles(true)
 	m.list = list.New(m.items(), del, 40, 20)
-	m.list.Title = "Claude Code settings"
+	m.list.Title = "Settings"
 	m.list.SetShowHelp(false)
 	m.list.SetStatusBarItemName("setting", "settings")
 	m.list.KeyMap.Quit.SetEnabled(false)
 	m.list.Filter = substringFilter
+	m.tools = list.New(m.toolItems(), del, 30, 20)
+	m.tools.Title = "Tools"
+	m.tools.SetShowHelp(false)
+	m.tools.SetStatusBarItemName("tool", "tools")
+	m.tools.KeyMap.Quit.SetEnabled(false)
+	m.tools.Filter = substringFilter
 	m.doc = viewport.New()
 	m.refreshDoc()
 	return m
@@ -111,6 +118,11 @@ func (m *model) items() []list.Item {
 		st := &m.sch.Settings[i]
 		out = append(out, item{st: st, desc: m.summary(st)})
 	}
+	return out
+}
+
+func (m *model) toolItems() []list.Item {
+	var out []list.Item
 	for i := range toolSettings {
 		st := &toolSettings[i]
 		out = append(out, item{st: st, desc: m.toolSummary(st)})
@@ -145,8 +157,15 @@ func (m *model) effective(st *schema.Setting) (any, store.Scope) {
 	return nil, ""
 }
 
+func (m *model) activeList() *list.Model {
+	if m.toolsFocus {
+		return &m.tools
+	}
+	return &m.list
+}
+
 func (m *model) selected() *schema.Setting {
-	if it, ok := m.list.SelectedItem().(item); ok {
+	if it, ok := m.activeList().SelectedItem().(item); ok {
 		return it.st
 	}
 	return nil
@@ -163,12 +182,22 @@ func (m *model) Init() tea.Cmd { return tea.RequestBackgroundColor }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case paneMsg:
+		target := &m.list
+		if msg.tools {
+			target = &m.tools
+		}
+		updated, cmd := target.Update(msg.msg)
+		*target = updated
+		m.refreshDoc()
+		return m, paneCommand(cmd, msg.tools)
 	case tea.BackgroundColorMsg:
 		m.isDark = msg.IsDark()
 		m.st = newStyles(m.isDark)
 		del := list.NewDefaultDelegate()
 		del.Styles = list.NewDefaultItemStyles(m.isDark)
 		m.list.SetDelegate(del)
+		m.tools.SetDelegate(del)
 		m.refreshDoc()
 		return m, nil
 	case tea.WindowSizeMsg:
@@ -197,7 +226,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if k, ok := msg.(tea.KeyPressMsg); ok && !m.list.SettingFilter() {
+	if k, ok := msg.(tea.KeyPressMsg); ok && !m.activeList().SettingFilter() {
 		switch {
 		case key.Matches(k, keys.quit):
 			return m, tea.Quit
@@ -242,10 +271,15 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.jumpSection(k.String() == "]")
 			m.refreshDoc()
 			return m, nil
-		case k.String() == "right", k.String() == "left", k.String() == "pgdown", k.String() == "pgup":
+		case key.Matches(k, keys.focus):
+			m.toolsFocus = k.String() == "right"
+			m.status = ""
+			m.refreshDoc()
+			return m, nil
+		case k.String() == "pgdown", k.String() == "pgup":
 			var cmd tea.Cmd
 			switch k.String() {
-			case "right", "pgdown":
+			case "pgdown":
 				m.doc.HalfPageDown()
 			default:
 				m.doc.HalfPageUp()
@@ -255,11 +289,33 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	before := m.selected()
 	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
+	*m.activeList(), cmd = m.activeList().Update(msg)
 	if m.selected() != before {
 		m.refreshDoc()
 	}
-	return m, cmd
+	return m, paneCommand(cmd, m.toolsFocus)
+}
+
+type paneMsg struct {
+	msg   tea.Msg
+	tools bool
+}
+
+func paneCommand(cmd tea.Cmd, tools bool) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg := cmd()
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			commands := make([]tea.Cmd, len(batch))
+			for i, c := range batch {
+				commands[i] = paneCommand(c, tools)
+			}
+			return tea.BatchMsg(commands)
+		}
+		return paneMsg{msg: msg, tools: tools}
+	}
 }
 
 func (m *model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -393,8 +449,11 @@ func (m *model) afterWrite() tea.Cmd {
 	idx := m.list.Index()
 	cmd := m.list.SetItems(m.items())
 	m.list.Select(idx)
+	toolIdx := m.tools.Index()
+	toolCmd := m.tools.SetItems(m.toolItems())
+	m.tools.Select(toolIdx)
 	m.refreshDoc()
-	return cmd
+	return tea.Batch(paneCommand(cmd, false), paneCommand(toolCmd, true))
 }
 
 func (m *model) cycleScope() {
@@ -413,12 +472,12 @@ func (m *model) jumpSection(forward bool) {
 	if st == nil {
 		return
 	}
-	items := m.list.Items()
-	i := m.list.Index()
+	items := m.activeList().Items()
+	i := m.activeList().Index()
 	if forward {
 		for j := i + 1; j < len(items); j++ {
 			if items[j].(item).st.Section != st.Section {
-				m.list.Select(j)
+				m.activeList().Select(j)
 				return
 			}
 		}
@@ -430,38 +489,48 @@ func (m *model) jumpSection(forward bool) {
 		j--
 	}
 	if j == 0 {
-		m.list.Select(0)
+		m.activeList().Select(0)
 		return
 	}
 	prev := items[j-1].(item).st.Section
 	for j > 0 && items[j-1].(item).st.Section == prev {
 		j--
 	}
-	m.list.Select(j)
+	m.activeList().Select(j)
 }
 
 func (m *model) setStatus(s string, isErr bool) { m.status, m.statusErr = s, isErr }
 
+// On smaller terminals the two lists stack beside the shared details pane.
 func (m *model) listWidth() int {
-	lw := m.width * 2 / 5
-	if lw < 34 {
-		lw = 34
+	if m.width >= 120 {
+		return m.width * 3 / 10
 	}
-	if lw > 64 {
-		lw = 64
+	return max(24, m.width*2/5)
+}
+
+func (m *model) paneSizes() (settingsWidth, toolsWidth, settingsHeight, toolsHeight int) {
+	h := max(12, m.height-3)
+	sw := m.listWidth()
+	if m.width >= 120 {
+		return sw, m.width / 4, h, h
 	}
-	return lw
+	return sw, sw, h / 2, h - h/2
 }
 
 func (m *model) layout() {
 	if m.width == 0 {
 		return
 	}
-	lw := m.listWidth()
-	h := m.height - 2 // header + status
-	m.list.SetSize(lw-4, h-2)
-	m.doc.SetWidth(m.width - lw - 6)
-	m.doc.SetHeight(h - 2)
+	sw, tw, sh, th := m.paneSizes()
+	m.list.SetSize(sw-4, sh-2)
+	m.tools.SetSize(tw-4, th-2)
+	dw := m.width - sw
+	if m.width >= 120 {
+		dw -= tw
+	}
+	m.doc.SetWidth(max(1, dw-4))
+	m.doc.SetHeight(max(1, m.height-5))
 	m.refreshDoc()
 }
 
@@ -472,7 +541,7 @@ func (m *model) refreshDoc() {
 		return
 	}
 	if toolName(st) != "" {
-		m.doc.SetContent(m.toolDoc(st))
+		m.doc.SetContent(lipgloss.NewStyle().Width(max(1, m.doc.Width())).Render(m.toolDoc(st)))
 		m.doc.GotoTop()
 		return
 	}
@@ -541,13 +610,27 @@ func (m *model) View() tea.View {
 		strings.Join(badges, ""),
 	)
 
-	lw := m.listWidth()
-	h := m.height - 2
-	left := m.st.paneFocus.Width(lw - 2).Height(h - 2).Render(m.list.View())
-	right := m.st.pane.Height(h - 2).Render(m.doc.View())
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	sw, tw, sh, th := m.paneSizes()
+	settingsStyle, toolsStyle := m.st.paneFocus, m.st.pane
+	if m.toolsFocus {
+		settingsStyle, toolsStyle = m.st.pane, m.st.paneFocus
+	}
+	left := settingsStyle.Width(sw).Height(sh).Render(m.list.View())
+	toolsPane := toolsStyle.Width(tw).Height(th).Render(m.tools.View())
+	right := m.st.pane.Width(m.doc.Width() + 4).Height(m.height - 3).Render(m.doc.View())
+	var body string
+	if m.width >= 120 {
+		body = lipgloss.JoinHorizontal(lipgloss.Top, left, toolsPane, right)
+	} else {
+		body = lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.JoinVertical(lipgloss.Left, left, toolsPane), right)
+	}
 
-	status := m.st.help.Render("enter edit · tab next value / toggle tool · u unset · s target file · [ ] section · / filter · o docs · r reload · q quit")
+	helpText := "←/→ pane · tab toggle · enter edit · / filter · r reload · q quit"
+	if m.width >= 140 {
+		helpText = "←/→ pane · tab toggle · enter edit · s scope · u unset · [ ] section · / filter · o docs · pgup/dn details · r reload · q quit"
+	}
+	help := m.st.help.Render(helpText)
+	status := ""
 	if m.mode == modeConfirmUnset {
 		if st := m.selected(); st != nil {
 			status = m.st.warn.Render(fmt.Sprintf("Remove %s from %s? (y/n)", st.Key, m.targetScope(st)))
@@ -562,7 +645,7 @@ func (m *model) View() tea.View {
 	for sc, err := range m.errs {
 		status += "  " + m.st.err.Render(fmt.Sprintf("[%s file unreadable: %v]", sc, err))
 	}
-	v.SetContent(lipgloss.JoinVertical(lipgloss.Left, header, body, lipgloss.NewStyle().MaxWidth(m.width).Render(status)))
+	v.SetContent(lipgloss.JoinVertical(lipgloss.Left, header, body, lipgloss.NewStyle().Width(m.width).MaxWidth(m.width).MaxHeight(1).Render(status), lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(1).Render(help)))
 	return v
 }
 

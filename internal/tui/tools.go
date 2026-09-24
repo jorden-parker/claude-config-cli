@@ -21,8 +21,10 @@ var toolSettings = func() []schema.Setting {
 }()
 
 func toolName(st *schema.Setting) string {
-	if st != nil && st.Section == "Tools" {
-		return st.Key
+	for i := range toolSettings {
+		if st == &toolSettings[i] {
+			return st.Key
+		}
 	}
 	return ""
 }

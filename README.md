@@ -42,29 +42,35 @@ ccfg                            # in a project directory
 ccfg -C ~/repo                  # another project
 ```
 
-| Key     | Action                                         |
-| ------- | ---------------------------------------------- |
-| `enter` | edit the highlighted setting                   |
-| `tab`   | next setting option / enable or disable a tool |
-| `u`     | remove it from the target file                 |
-| `s`     | switch the target file: user, project, local   |
-| `/`     | filter by key or section                       |
-| `[` `]` | jump between sections                          |
-| `o`     | open the docs page for the key                 |
-| `r`     | reload the settings files                      |
-| `q`     | quit                                           |
+| Key           | Action                                         |
+| ------------- | ---------------------------------------------- |
+| `enter`       | edit the highlighted setting                   |
+| `tab`         | next setting option / enable or disable a tool |
+| `u`           | remove it from the target file                 |
+| `s`           | switch the target file: user, project, local   |
+| `/`           | filter by key or section                       |
+| `←` `→`       | switch between Settings and Tools panes        |
+| `pgup` `pgdn` | scroll the details pane                        |
+| `[` `]`       | jump between sections                          |
+| `o`           | open the docs page for the key                 |
+| `r`           | reload the settings files                      |
+| `q`           | quit                                           |
 
 Global-config keys (`~/.claude.json`) always write there, whatever the target.
 Managed settings are shown read-only.
 
-The **Tools** section lists Claude Code tools such as `NotebookEdit`, `Bash`,
-and `Read`, displayed by name without a `tools.` prefix. Jump between sections
-with `[` / `]`, or filter `/Tools` to show only tools. Filter with `/NotebookEdit`, then press `tab` (or `enter`) to toggle
-that tool in the selected target file. Disabling adds its bare name to
-`permissions.deny`; enabling removes that exact entry. Normal permission prompts,
-scoped rules, and denies in other files still apply. The details pane shows which
-files disable the tool. Tool availability depends on your Claude Code version
-and session; the catalogue comes from the [tools reference](https://code.claude.com/docs/en/tools-reference).
+The **Tools** pane lists Claude Code tools such as `NotebookEdit`, `Bash`,
+and `Read`. Press `→` to focus Tools and `←` to return to Settings. Each pane
+keeps its own selection and filter. In Tools, filter with `/NotebookEdit`, then
+press `tab` (or `enter`) to toggle the tool in the selected target file.
+The details pane follows the focused list; `pgup` / `pgdn` scroll its contents.
+On narrower terminals, Settings and Tools stack beside the details pane.
+
+Disabling adds the tool's bare name to `permissions.deny`; enabling removes that
+exact entry. Normal permission prompts, scoped rules, and denies in other files
+still apply. Tool availability depends on your Claude Code version and session;
+the catalogue comes from the [tools reference](https://code.claude.com/docs/en/tools-reference).
+Reload and save messages appear above the keyboard-help footer, which stays visible.
 
 Editors per value kind:
 
