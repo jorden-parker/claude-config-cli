@@ -10,18 +10,23 @@ file the docs say Claude Code won't read it from.
 
 ## Install
 
-```sh
-go install github.com/jorden-parker/claude-config-cli@latest
-```
-
-For the short name `ccfg`, also install:
+On macOS or Linux, install with Bash, Git, and Go (the Go version in `go.mod`
+or newer; Go's automatic toolchain download can supply it):
 
 ```sh
-go install github.com/jorden-parker/claude-config-cli/cmd/ccfg@latest
+curl -fsSL https://raw.githubusercontent.com/jorden-parker/claude-config-cli/main/install.sh | bash
 ```
 
-Both run the same commands. The examples below use the short name; swap in
-`claude-config-cli` if you only installed that.
+The script builds from `main`, installs both `ccfg` and `claude-config-cli` into
+`~/.local/bin`, and adds that directory to your shell's PATH (Bash, Zsh, or Fish).
+Open a new terminal, then run `ccfg --help`. Both commands run the same CLI;
+the examples below use the short name. Run the installer again to update.
+
+From a local checkout, install your current source with:
+
+```sh
+./install.sh
+```
 
 Or build locally:
 
@@ -37,17 +42,17 @@ ccfg                            # in a project directory
 ccfg -C ~/repo                  # another project
 ```
 
-| Key         | Action                                       |
-| ----------- | -------------------------------------------- |
-| `enter`     | edit the highlighted setting                 |
-| `tab`       | single-value setting: set the next option    |
-| `u`         | remove it from the target file               |
-| `s`         | switch the target file: user, project, local |
-| `/`         | filter by key or section                     |
-| `[` `]`     | jump between sections                        |
-| `o`         | open the docs page for the key               |
-| `r`         | reload the settings files                    |
-| `q`         | quit                                         |
+| Key     | Action                                       |
+| ------- | -------------------------------------------- |
+| `enter` | edit the highlighted setting                 |
+| `tab`   | single-value setting: set the next option    |
+| `u`     | remove it from the target file               |
+| `s`     | switch the target file: user, project, local |
+| `/`     | filter by key or section                     |
+| `[` `]` | jump between sections                        |
+| `o`     | open the docs page for the key               |
+| `r`     | reload the settings files                    |
+| `q`     | quit                                         |
 
 Global-config keys (`~/.claude.json`) always write there, whatever the target.
 Managed settings are shown read-only.
