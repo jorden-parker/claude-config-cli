@@ -13,10 +13,57 @@ import (
 // Virtual rows: these are backed by permissions.deny, never standalone settings keys.
 // Catalogue: https://code.claude.com/docs/en/tools-reference
 var toolSettings = func() []schema.Setting {
-	names := strings.Fields(`Agent Artifact AskUserQuestion Bash CronCreate CronDelete CronList Edit EndConversation EnterPlanMode EnterWorktree ExitPlanMode ExitWorktree Glob Grep ListAgents ListMcpResourcesTool LSP Monitor NotebookEdit PowerShell PushNotification Read ReadMcpResourceTool RemoteTrigger ReportFindings ScheduleWakeup SendFeedback SendMessage SendUserFile ShareOnboardingGuide Skill SubagentHandback TaskCreate TaskGet TaskList TaskOutput TaskStop TaskUpdate TodoWrite ToolSearch WaitForMcpServers WebFetch WebSearch Workflow Write`)
-	out := make([]schema.Setting, len(names))
-	for i, name := range names {
-		out[i] = schema.Setting{Key: name, Section: "Tools", Kind: schema.KindBool, ScopeClass: schema.ScopeAny}
+	entries := []struct{ name, desc string }{
+		{"Agent", "Delegate work to subagents."},
+		{"Artifact", "Publish shareable interactive pages."},
+		{"AskUserQuestion", "Ask you multiple-choice questions."},
+		{"Bash", "Run shell commands."},
+		{"CronCreate", "Schedule prompts within this session."},
+		{"CronDelete", "Cancel a scheduled prompt."},
+		{"CronList", "Show this session's scheduled prompts."},
+		{"Edit", "Replace selected file content."},
+		{"EndConversation", "End the current conversation."},
+		{"EnterPlanMode", "Plan changes before implementation."},
+		{"EnterWorktree", "Create or enter a worktree."},
+		{"ExitPlanMode", "Request approval of a plan."},
+		{"ExitWorktree", "Return from a worktree."},
+		{"Glob", "Locate files by filename pattern."},
+		{"Grep", "Find matching text inside files."},
+		{"ListAgents", "Find agents available for messaging."},
+		{"ListMcpResourcesTool", "Discover connected MCP resources."},
+		{"LSP", "Inspect symbols, references, and diagnostics."},
+		{"Monitor", "Watch command or WebSocket events."},
+		{"NotebookEdit", "Change Jupyter notebook cells."},
+		{"PowerShell", "Run commands using PowerShell."},
+		{"PushNotification", "Notify your desktop or phone."},
+		{"Read", "Open files for inspection."},
+		{"ReadMcpResourceTool", "Open an MCP resource."},
+		{"RemoteTrigger", "Manage routines on claude.ai."},
+		{"ReportFindings", "Present structured code-review findings."},
+		{"ScheduleWakeup", "Reschedule or stop self-paced loops."},
+		{"SendFeedback", "Draft feedback for your review."},
+		{"SendMessage", "Message agents or other sessions."},
+		{"SendUserFile", "Deliver files to your device."},
+		{"ShareOnboardingGuide", "Upload and share ONBOARDING.md."},
+		{"Skill", "Run a skill's instructions."},
+		{"SubagentHandback", "Return a subagent's final report."},
+		{"TaskCreate", "Add a tracked task."},
+		{"TaskGet", "Inspect one tracked task."},
+		{"TaskList", "Show tracked tasks and status."},
+		{"TaskOutput", "Read background-task output (deprecated)."},
+		{"TaskStop", "Halt a background task."},
+		{"TaskUpdate", "Modify or delete tracked tasks."},
+		{"TodoWrite", "Maintain the legacy task checklist."},
+		{"ToolSearch", "Discover and load deferred tools."},
+		{"WaitForMcpServers", "Await pending MCP connections."},
+		{"WebFetch", "Retrieve a web page."},
+		{"WebSearch", "Find information online."},
+		{"Workflow", "Orchestrate subagents through scripts."},
+		{"Write", "Save or overwrite entire files."},
+	}
+	out := make([]schema.Setting, len(entries))
+	for i, entry := range entries {
+		out[i] = schema.Setting{Key: entry.name, Desc: entry.desc, Section: "Tools", Kind: schema.KindBool, ScopeClass: schema.ScopeAny}
 	}
 	return out
 }()
@@ -138,6 +185,7 @@ func (m *model) toolDoc(st *schema.Setting, w int) string {
 	}
 	var b strings.Builder
 	b.WriteString(s.title.Render(name) + "\n" + s.subtle.Render("Claude Code tool  ") + state + "\n\n")
+	b.WriteString(docDescription(s, st, w))
 	b.WriteString(s.label.Render("Where it's turned off") + "  " + s.subtle.Render("any file can turn it off") + "\n")
 	for _, sc := range []store.Scope{store.ScopeManaged, store.ScopeLocal, store.ScopeProject, store.ScopeUser} {
 		label := s.value.Render(fmt.Sprintf("%-9s", sc))

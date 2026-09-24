@@ -74,6 +74,8 @@ Managed settings are shown read-only.
 
 The **Tools** view lists Claude Code tools such as `NotebookEdit`, `Bash`,
 and `Read`. Settings and Tools share one column, with only one visible at a time.
+Every tool includes a searchable description preview and a **What it does**
+section in the details pane.
 Press `→` to show Tools and `←` to return to Settings. Each list
 keeps its own selection and filter. In Tools, filter with `/NotebookEdit`, then
 press `tab` (or `enter`) to toggle the tool in the selected target file.
