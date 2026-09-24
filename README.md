@@ -11,16 +11,13 @@ file the docs say Claude Code won't read it from.
 ## Install
 
 ```sh
-go install github.com/jorden-parker/claude-config-cli@latest
+go install github.com/jorden-parker/claude-config-cli/cmd/claude-config@latest
 ```
-
-This installs `claude-config-cli`; use that command in place of `claude-config`
-in the examples below.
 
 Or build locally:
 
 ```sh
-go build -o claude-config .
+go build ./cmd/claude-config
 ```
 
 ## Interactive editor
@@ -33,8 +30,9 @@ claude-config -C ~/repo  # another project
 | Key         | Action                                       |
 | ----------- | -------------------------------------------- |
 | `enter`     | edit the highlighted setting                 |
+| `tab`       | single-value setting: set the next option    |
 | `u`         | remove it from the target file               |
-| `s` / `tab` | switch the target file: user, project, local |
+| `s`         | switch the target file: user, project, local |
 | `/`         | filter by key or section                     |
 | `[` `]`     | jump between sections                        |
 | `o`         | open the docs page for the key               |

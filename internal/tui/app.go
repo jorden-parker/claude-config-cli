@@ -18,6 +18,7 @@ import (
 
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
 	"github.com/jorden-parker/claude-config-cli/internal/store"
+	"github.com/jorden-parker/claude-config-cli/internal/value"
 )
 
 func jsonUnmarshal(s string, v any) error { return json.Unmarshal([]byte(s), v) }
@@ -40,13 +41,14 @@ func (i item) Description() string { return i.desc }
 func (i item) FilterValue() string { return i.st.Key + " " + i.st.Section }
 
 type keymap struct {
-	edit, unset, scope, docs, focus, quit, reload, sectionNext, sectionPrev key.Binding
+	edit, cycle, unset, scope, docs, focus, quit, reload, sectionNext, sectionPrev key.Binding
 }
 
 var keys = keymap{
 	edit:        key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "edit")),
 	unset:       key.NewBinding(key.WithKeys("u", "backspace", "delete"), key.WithHelp("u", "unset")),
-	scope:       key.NewBinding(key.WithKeys("s", "tab"), key.WithHelp("s/tab", "target file")),
+	cycle:       key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next value")),
+	scope:       key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "target file")),
 	docs:        key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open docs")),
 	focus:       key.NewBinding(key.WithKeys("right", "left"), key.WithHelp("←/→", "scroll doc")),
 	quit:        key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
@@ -197,6 +199,8 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case key.Matches(k, keys.edit):
 			return m, m.startEdit()
+		case key.Matches(k, keys.cycle):
+			return m, m.cycleValue()
 		case key.Matches(k, keys.unset):
 			st := m.selected()
 			if st == nil {
@@ -296,6 +300,61 @@ func (m *model) startEdit() tea.Cmd {
 	m.edit = newEdit(st, cur, m.sch, m.width-4, m.height-4, m.isDark)
 	m.mode = modeEdit
 	return m.edit.form.Init()
+}
+
+// cycleValue sets a single-value setting to its next option and saves it.
+// Settings without a fixed option list open the editor instead; settings that
+// hold several values (arrays, maps, JSON) are left to enter.
+func (m *model) cycleValue() tea.Cmd {
+	st := m.selected()
+	if st == nil {
+		return nil
+	}
+	var opts []string
+	switch st.Kind {
+	case schema.KindBool:
+		opts = []string{"true", "false"}
+	case schema.KindEnum, schema.KindEnumOrString:
+		opts = st.Options
+	case schema.KindString, schema.KindNumber:
+		return m.startEdit()
+	default:
+		m.setStatus(fmt.Sprintf("%s holds several values; press enter to edit it", st.Key), true)
+		return nil
+	}
+	if len(opts) == 0 {
+		return m.startEdit()
+	}
+	sc := m.targetScope(st)
+	if !store.Allowed(st, sc) {
+		m.setStatus(fmt.Sprintf("%s isn't read from %s settings (docs: %s). Press s to change the target file.", st.Key, sc, st.Scope), true)
+		return nil
+	}
+	f := m.files[sc]
+	next := opts[0]
+	if cur, ok := f.Get(st.Key); ok {
+		for i, o := range opts {
+			if o == fmt.Sprint(cur) {
+				next = opts[(i+1)%len(opts)]
+				break
+			}
+		}
+	}
+	v, err := value.Parse(st, next)
+	if err != nil {
+		m.setStatus(err.Error(), true)
+		return nil
+	}
+	if err := f.Set(st.Key, v); err != nil {
+		m.setStatus(err.Error(), true)
+		return nil
+	}
+	if err := f.Save(); err != nil {
+		m.setStatus("save failed: "+err.Error(), true)
+		return nil
+	}
+	m.setStatus(fmt.Sprintf("saved %s = %s → %s", st.Key, short(store.Format(v), 40), f.Path), false)
+	return m.afterWrite()
 }
 
 func (m *model) doUnset() tea.Cmd {
@@ -465,7 +524,7 @@ func (m *model) View() tea.View {
 	right := m.st.pane.Height(h - 2).Render(m.doc.View())
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
-	status := m.st.help.Render("enter edit · u unset · s/tab target file · [ ] section · / filter · o docs · r reload · q quit")
+	status := m.st.help.Render("enter edit · tab next value · u unset · s target file · [ ] section · / filter · o docs · r reload · q quit")
 	if m.mode == modeConfirmUnset {
 		if st := m.selected(); st != nil {
 			status = m.st.warn.Render(fmt.Sprintf("Remove %s from %s? (y/n)", st.Key, m.targetScope(st)))
