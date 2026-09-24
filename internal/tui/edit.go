@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/huh/v2"
 
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
@@ -147,7 +148,9 @@ func newEdit(st *schema.Setting, current any, sch *schema.Schema, width, height 
 			Validate(func(s string) error { _, err := value.Parse(st, s); return err })))
 	}
 
-	e.form = huh.NewForm(groups...).WithTheme(huh.ThemeFunc(huh.ThemeCharm)).WithWidth(width).WithHeight(height).WithShowHelp(true)
+	km := huh.NewDefaultKeyMap()
+	km.Quit = key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc", "cancel"))
+	e.form = huh.NewForm(groups...).WithTheme(formTheme(isDark)).WithKeyMap(km).WithWidth(width).WithHeight(height).WithShowHelp(true)
 	return e
 }
 

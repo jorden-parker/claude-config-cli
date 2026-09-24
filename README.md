@@ -42,19 +42,25 @@ ccfg                            # in a project directory
 ccfg -C ~/repo                  # another project
 ```
 
-| Key           | Action                                         |
-| ------------- | ---------------------------------------------- |
-| `enter`       | edit the highlighted setting                   |
-| `tab`         | next setting option / enable or disable a tool |
-| `u`           | remove it from the target file                 |
-| `s`           | switch the target file: user, project, local   |
-| `/`           | filter by key or section                       |
-| `←` `→`       | switch between Settings and Tools panes        |
-| `pgup` `pgdn` | scroll the details pane                        |
-| `[` `]`       | jump between sections                          |
-| `o`           | open the docs page for the key                 |
-| `r`           | reload the settings files                      |
-| `q`           | quit                                           |
+| Key           | Action                                       |
+| ------------- | -------------------------------------------- |
+| `enter`       | edit the setting, or turn the tool on or off |
+| `tab`         | next value, or turn the tool on or off       |
+| `u`           | remove the key from the target file          |
+| `s`           | switch the target file: user, project, local |
+| `/`           | filter by key or section (`esc` clears it)   |
+| `←` `→`       | switch between Settings and Tools            |
+| `[` `]`       | jump to the previous or next section         |
+| `pgup` `pgdn` | scroll the details pane                      |
+| `o`           | open the docs page for the key               |
+| `r`           | reload the settings files                    |
+| `?`           | show every key                               |
+| `q`           | quit                                         |
+
+Each row shows the value in effect and the file it comes from. The details
+pane lists the settings files from highest to lowest priority, shows which
+value wins, and marks the target file your edits go to. In the edit form, `esc` cancels without
+saving.
 
 Global-config keys (`~/.claude.json`) always write there, whatever the target.
 Managed settings are shown read-only.

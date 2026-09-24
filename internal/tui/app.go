@@ -5,6 +5,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
 	"github.com/jorden-parker/claude-config-cli/internal/store"
@@ -29,32 +31,39 @@ const (
 	modeBrowse mode = iota
 	modeEdit
 	modeConfirmUnset
+	modeHelp
 )
 
+// editChrome is the rows around the edit form: padding plus its heading.
+const editChrome = 6
+
 type item struct {
-	st   *schema.Setting
-	desc string
+	st    *schema.Setting
+	val   string // value in effect, compact JSON; empty when unset
+	scope string // file the value (or the tool's deny rule) comes from
+	tool  bool
+	off   bool // tool is disabled by a deny rule in some file
 }
 
-func (i item) Title() string       { return i.st.Key }
-func (i item) Description() string { return i.desc }
 func (i item) FilterValue() string { return i.st.Key + " " + i.st.Section }
 
 type keymap struct {
-	edit, cycle, unset, scope, docs, focus, quit, reload, sectionNext, sectionPrev key.Binding
+	edit, cycle, unset, scope, docs, focus, quit, reload, sectionNext, sectionPrev, help, esc key.Binding
 }
 
 var keys = keymap{
 	edit:        key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "edit")),
-	unset:       key.NewBinding(key.WithKeys("u", "backspace", "delete"), key.WithHelp("u", "unset")),
+	unset:       key.NewBinding(key.WithKeys("u", "backspace", "delete"), key.WithHelp("u", "remove")),
 	cycle:       key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next value")),
 	scope:       key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "target file")),
 	docs:        key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open docs")),
-	focus:       key.NewBinding(key.WithKeys("right", "left"), key.WithHelp("←/→", "switch pane")),
+	focus:       key.NewBinding(key.WithKeys("right", "left"), key.WithHelp("←/→", "settings/tools")),
 	quit:        key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	reload:      key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reload files")),
 	sectionNext: key.NewBinding(key.WithKeys("]"), key.WithHelp("[/]", "section")),
 	sectionPrev: key.NewBinding(key.WithKeys("[")),
+	help:        key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "all keys")),
+	esc:         key.NewBinding(key.WithKeys("esc")),
 }
 
 type model struct {
@@ -88,23 +97,55 @@ func newModel(cwd string) *model {
 	m := &model{cwd: cwd, sch: schema.Load(), scope: store.ScopeUser, isDark: true}
 	m.st = newStyles(true)
 	m.reload()
-	del := list.NewDefaultDelegate()
-	del.Styles = list.NewDefaultItemStyles(true)
-	m.list = list.New(m.items(), del, 40, 20)
-	m.list.Title = "Settings"
-	m.list.SetShowHelp(false)
-	m.list.SetStatusBarItemName("setting", "settings")
-	m.list.KeyMap.Quit.SetEnabled(false)
-	m.list.Filter = substringFilter
-	m.tools = list.New(m.toolItems(), del, 30, 20)
-	m.tools.Title = "Tools"
-	m.tools.SetShowHelp(false)
-	m.tools.SetStatusBarItemName("tool", "tools")
-	m.tools.KeyMap.Quit.SetEnabled(false)
-	m.tools.Filter = substringFilter
+	m.list = m.newList(m.items(), "setting", "settings")
+	m.tools = m.newList(m.toolItems(), "tool", "tools")
+	m.applyStyles()
 	m.doc = viewport.New()
 	m.refreshDoc()
 	return m
+}
+
+func (m *model) newList(items []list.Item, singular, plural string) list.Model {
+	l := list.New(items, rowDelegate{m.st}, 40, 20)
+	l.SetShowHelp(false)
+	l.SetShowStatusBar(false)
+	l.SetShowPagination(false)
+	l.SetStatusBarItemName(singular, plural)
+	l.KeyMap.Quit.SetEnabled(false)
+	l.KeyMap.ShowFullHelp.SetEnabled(false)
+	l.KeyMap.CloseFullHelp.SetEnabled(false)
+	l.FilterInput.Prompt = "/ "
+	l.Filter = substringFilter
+	return l
+}
+
+// applyStyles pushes the current palette into both lists; called again when
+// the terminal reports whether its background is light or dark.
+func (m *model) applyStyles() {
+	for _, l := range []*list.Model{&m.list, &m.tools} {
+		l.SetDelegate(rowDelegate{m.st})
+		ls := list.DefaultStyles(m.isDark)
+		ls.TitleBar = lipgloss.NewStyle().Padding(0, 0, 1, 0)
+		ls.Title = lipgloss.NewStyle()
+		ls.NoItems = m.st.subtle.PaddingLeft(2)
+		ls.Filter.Focused.Prompt = m.st.accent.Bold(true)
+		ls.Filter.Blurred.Prompt = m.st.subtle
+		ls.Filter.Cursor.Color = m.st.p.accent
+		l.Styles = ls
+		l.FilterInput.SetStyles(ls.Filter)
+	}
+	m.list.Title = m.tabs(false)
+	m.tools.Title = m.tabs(true)
+}
+
+// tabs renders the Settings and Tools switcher shown at the top of the list.
+func (m *model) tabs(tools bool) string {
+	settings := fmt.Sprintf("Settings %d", len(m.sch.Settings))
+	tl := fmt.Sprintf("Tools %d", len(toolSettings))
+	if tools {
+		return m.st.tab.Render(settings) + "   " + m.st.tabOn.Render(tl)
+	}
+	return m.st.tabOn.Render(settings) + "   " + m.st.tab.Render(tl)
 }
 
 func (m *model) reload() {
@@ -116,7 +157,11 @@ func (m *model) items() []list.Item {
 	var out []list.Item
 	for i := range m.sch.Settings {
 		st := &m.sch.Settings[i]
-		out = append(out, item{st: st, desc: m.summary(st)})
+		it := item{st: st}
+		if v, sc := m.effective(st); sc != "" {
+			it.val, it.scope = store.Format(v), string(sc)
+		}
+		out = append(out, it)
 	}
 	return out
 }
@@ -125,20 +170,13 @@ func (m *model) toolItems() []list.Item {
 	var out []list.Item
 	for i := range toolSettings {
 		st := &toolSettings[i]
-		out = append(out, item{st: st, desc: m.toolSummary(st)})
+		it := item{st: st, tool: true}
+		if sc := m.toolDeniedIn(st); sc != "" {
+			it.off, it.scope = true, string(sc)
+		}
+		out = append(out, it)
 	}
 	return out
-}
-
-func (m *model) summary(st *schema.Setting) string {
-	parts := []string{st.Section}
-	if v, sc := m.effective(st); sc != "" {
-		parts = append(parts, fmt.Sprintf("= %s [%s]", short(store.Format(v), 24), sc))
-	}
-	if st.Deprecated != "" {
-		parts = append(parts, "removed")
-	}
-	return short(strings.Join(parts, " · "), max(m.listWidth()-8, 20))
 }
 
 // effective returns the highest-precedence value set for a key.
@@ -194,17 +232,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BackgroundColorMsg:
 		m.isDark = msg.IsDark()
 		m.st = newStyles(m.isDark)
-		del := list.NewDefaultDelegate()
-		del.Styles = list.NewDefaultItemStyles(m.isDark)
-		m.list.SetDelegate(del)
-		m.tools.SetDelegate(del)
+		m.applyStyles()
 		m.refreshDoc()
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
 		if m.edit != nil {
-			m.edit.form = m.edit.form.WithWidth(m.width - 4).WithHeight(m.height - 4)
+			m.edit.form = m.edit.form.WithWidth(m.width - 4).WithHeight(m.height - editChrome)
 		}
 		return m, nil
 	}
@@ -212,6 +247,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.mode {
 	case modeEdit:
 		return m.updateEdit(msg)
+	case modeHelp:
+		if _, ok := msg.(tea.KeyPressMsg); ok {
+			m.mode = modeBrowse
+		}
+		return m, nil
 	case modeConfirmUnset:
 		if k, ok := msg.(tea.KeyPressMsg); ok {
 			m.mode = modeBrowse
@@ -219,6 +259,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "y", "Y", "enter":
 				return m, m.doUnset()
 			}
+			m.setStatus("Kept "+m.selected().Key+". Nothing removed.", false)
 		}
 		return m, nil
 	}
@@ -230,6 +271,12 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(k, keys.quit):
 			return m, tea.Quit
+		case key.Matches(k, keys.help):
+			m.mode = modeHelp
+			return m, nil
+		case key.Matches(k, keys.esc) && !m.activeList().IsFiltered():
+			m.status = ""
+			return m, nil
 		case key.Matches(k, keys.edit):
 			return m, m.startEdit()
 		case key.Matches(k, keys.cycle):
@@ -237,7 +284,7 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(k, keys.unset):
 			st := m.selected()
 			if toolName(st) != "" {
-				m.setStatus("Press tab to enable or disable this tool in the target file", false)
+				m.setStatus("Tools are turned on and off with tab. Nothing to remove.", false)
 				return m, nil
 			}
 			if st == nil {
@@ -245,7 +292,7 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			f := m.files[m.targetScope(st)]
 			if _, ok := f.Get(st.Key); !ok {
-				m.setStatus(fmt.Sprintf("%s is not set in %s", st.Key, f.Path), true)
+				m.setStatus(fmt.Sprintf("%s is not set in the %s file. Nothing to remove.", st.Key, m.targetScope(st)), true)
 				return m, nil
 			}
 			m.mode = modeConfirmUnset
@@ -260,12 +307,12 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 					url = "https://code.claude.com/docs/en/tools-reference"
 				}
 				openURL(url)
-				m.setStatus("opened "+url, false)
+				m.setStatus("Opened docs in your browser: "+url, false)
 			}
 			return m, nil
 		case key.Matches(k, keys.reload):
 			m.reload()
-			m.setStatus("reloaded settings files", false)
+			m.setStatus("Reloaded settings files", false)
 			return m, m.afterWrite()
 		case key.Matches(k, keys.sectionNext), key.Matches(k, keys.sectionPrev):
 			m.jumpSection(k.String() == "]")
@@ -273,7 +320,6 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(k, keys.focus):
 			m.toolsFocus = k.String() == "right"
-			m.status = ""
 			m.refreshDoc()
 			return m, nil
 		case k.String() == "pgdown", k.String() == "pgup":
@@ -327,7 +373,7 @@ func (m *model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case huh.StateAborted:
 		m.mode = modeBrowse
 		m.edit = nil
-		m.setStatus("edit cancelled", false)
+		m.setStatus("Edit cancelled. Nothing saved.", false)
 	case huh.StateCompleted:
 		v, err := m.edit.result()
 		st := m.edit.st
@@ -344,10 +390,10 @@ func (m *model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if err := f.Save(); err != nil {
-			m.setStatus("save failed: "+err.Error(), true)
+			m.setStatus("Save failed: "+err.Error(), true)
 			return m, nil
 		}
-		m.setStatus(fmt.Sprintf("saved %s = %s → %s", st.Key, short(store.Format(v), 40), f.Path), false)
+		m.setStatus(fmt.Sprintf("Saved %s = %s in %s", st.Key, short(store.Format(v), 40), tildify(f.Path)), false)
 		return m, m.afterWrite()
 	}
 	return m, cmd
@@ -363,11 +409,11 @@ func (m *model) startEdit() tea.Cmd {
 	}
 	sc := m.targetScope(st)
 	if !store.Allowed(st, sc) {
-		m.setStatus(fmt.Sprintf("%s isn't read from %s settings (docs: %s). Press s to change the target file.", st.Key, sc, st.Scope), true)
+		m.setStatus(notReadHere(st, sc), true)
 		return nil
 	}
 	cur, _ := m.files[sc].Get(st.Key)
-	m.edit = newEdit(st, cur, m.sch, m.width-4, m.height-4, m.isDark)
+	m.edit = newEdit(st, cur, m.sch, m.width-4, m.height-editChrome, m.isDark)
 	m.mode = modeEdit
 	return m.edit.form.Init()
 }
@@ -392,7 +438,7 @@ func (m *model) cycleValue() tea.Cmd {
 	case schema.KindString, schema.KindNumber:
 		return m.startEdit()
 	default:
-		m.setStatus(fmt.Sprintf("%s holds several values; press enter to edit it", st.Key), true)
+		m.setStatus(fmt.Sprintf("%s holds several values. Press enter to edit it.", st.Key), true)
 		return nil
 	}
 	if len(opts) == 0 {
@@ -400,7 +446,7 @@ func (m *model) cycleValue() tea.Cmd {
 	}
 	sc := m.targetScope(st)
 	if !store.Allowed(st, sc) {
-		m.setStatus(fmt.Sprintf("%s isn't read from %s settings (docs: %s). Press s to change the target file.", st.Key, sc, st.Scope), true)
+		m.setStatus(notReadHere(st, sc), true)
 		return nil
 	}
 	f := m.files[sc]
@@ -423,10 +469,10 @@ func (m *model) cycleValue() tea.Cmd {
 		return nil
 	}
 	if err := f.Save(); err != nil {
-		m.setStatus("save failed: "+err.Error(), true)
+		m.setStatus("Save failed: "+err.Error(), true)
 		return nil
 	}
-	m.setStatus(fmt.Sprintf("saved %s = %s → %s", st.Key, short(store.Format(v), 40), f.Path), false)
+	m.setStatus(fmt.Sprintf("Saved %s = %s in %s", st.Key, short(store.Format(v), 40), tildify(f.Path)), false)
 	return m.afterWrite()
 }
 
@@ -438,10 +484,10 @@ func (m *model) doUnset() tea.Cmd {
 	f := m.files[m.targetScope(st)]
 	f.Unset(st.Key)
 	if err := f.Save(); err != nil {
-		m.setStatus("save failed: "+err.Error(), true)
+		m.setStatus("Save failed: "+err.Error(), true)
 		return nil
 	}
-	m.setStatus(fmt.Sprintf("removed %s from %s", st.Key, f.Path), false)
+	m.setStatus(fmt.Sprintf("Removed %s from %s", st.Key, tildify(f.Path)), false)
 	return m.afterWrite()
 }
 
@@ -506,66 +552,257 @@ func (m *model) listWidth() int {
 	return min(64, max(24, m.width*2/5))
 }
 
+// Rows outside the panes: header, status line, key hints.
+const chromeRows = 3
+
 func (m *model) layout() {
 	if m.width == 0 {
 		return
 	}
 	lw := m.listWidth()
-	h := max(1, m.height-5)
-	m.list.SetSize(lw-4, h)
-	m.tools.SetSize(lw-4, h)
+	inner := max(1, m.height-chromeRows-2) // minus pane borders
+	m.list.SetSize(lw-4, max(1, inner-1))  // minus the position line
+	m.tools.SetSize(lw-4, max(1, inner-1))
 	m.doc.SetWidth(max(1, m.width-lw-4))
-	m.doc.SetHeight(h)
+	m.doc.SetHeight(inner)
 	m.refreshDoc()
 }
 
 func (m *model) refreshDoc() {
 	st := m.selected()
 	if st == nil {
-		m.doc.SetContent("")
+		m.doc.SetContent(m.st.subtle.Width(max(1, m.doc.Width())).Render("Nothing matches the filter. Press esc to clear it."))
 		return
 	}
-	if toolName(st) != "" {
-		m.doc.SetContent(lipgloss.NewStyle().Width(max(1, m.doc.Width())).Render(m.toolDoc(st)))
-		m.doc.GotoTop()
-		return
-	}
-
 	w := m.doc.Width()
 	if w < 20 {
 		w = 60
 	}
-	var b strings.Builder
-	b.WriteString(RenderDoc(st, w))
-	b.WriteString("\n" + m.st.label.Render("Current values") + "\n")
-	any := false
-	for _, sc := range store.All {
-		f := m.files[sc]
-		if f == nil {
-			continue
-		}
-		if st.Global && sc != store.ScopeGlobal || !st.Global && sc == store.ScopeGlobal {
-			continue
-		}
-		if v, ok := f.Get(st.Key); ok {
-			any = true
-			line := fmt.Sprintf("  %-8s %s", sc, store.Format(v))
-			b.WriteString(lipgloss.NewStyle().Width(w).Render(m.st.ok.Render(line)) + "\n")
-		}
+	if toolName(st) != "" {
+		m.doc.SetContent(lipgloss.NewStyle().Width(w).Render(m.toolDoc(st, w)))
+		m.doc.GotoTop()
+		return
 	}
-	if !any {
-		b.WriteString(m.st.subtle.Render("  not set in any file; default applies") + "\n")
+	m.doc.SetContent(docHead(m.st, st) + "\n" + m.ladder(st, w) + "\n" + docBody(m.st, st, w))
+	m.doc.GotoTop()
+}
+
+// ladder lists every file that can hold the key, highest precedence first,
+// and marks the one in effect and the one edits go to.
+func (m *model) ladder(st *schema.Setting, w int) string {
+	s := m.st
+	order := []store.Scope{store.ScopeManaged, store.ScopeLocal, store.ScopeProject, store.ScopeUser}
+	if st.Global {
+		order = []store.Scope{store.ScopeGlobal}
 	}
 	target := m.targetScope(st)
-	allowed := store.Allowed(st, target)
-	tl := fmt.Sprintf("\nTarget file: %s (%s)", target, store.Path(target, m.cwd))
-	if allowed {
-		b.WriteString(m.st.subtle.Render(tl) + "\n")
-	} else {
-		b.WriteString(m.st.warn.Render(tl+" — not read from here; press s to switch") + "\n")
+	var b strings.Builder
+	b.WriteString(s.label.Render("Where it's set") + "  " + s.subtle.Render("higher rows win") + "\n")
+	won := false
+	for _, sc := range order {
+		f := m.files[sc]
+		v, ok := any(nil), false
+		if f != nil {
+			v, ok = f.Get(st.Key)
+		}
+		tag := ""
+		switch {
+		case sc == target:
+			tag = s.accent.Render("◂ target file")
+		case sc == store.ScopeManaged:
+			tag = s.subtle.Render("read-only")
+		}
+		room := max(4, w-12-lipgloss.Width(tag)-2)
+		var marker, val string
+		switch {
+		case ok && !won:
+			won = true
+			marker, val = s.set.Render("● "), s.set.Render(short(store.Format(v), room))
+		case ok:
+			marker, val = s.subtle.Render("○ "), s.subtle.Strikethrough(true).Render(short(store.Format(v), room))
+		default:
+			marker, val = "  ", s.faint.Render("–")
+		}
+		name := s.value.Render(fmt.Sprintf("%-9s", sc))
+		if sc == target {
+			name = s.accent.Bold(true).Render(fmt.Sprintf("%-9s", sc))
+		}
+		line := marker + name + " " + val
+		if tag != "" {
+			line += strings.Repeat(" ", max(2, w-lipgloss.Width(line)-lipgloss.Width(tag))) + tag
+		}
+		b.WriteString(line + "\n")
 	}
-	m.doc.SetContent(b.String())
-	m.doc.GotoTop()
+	def := st.Default
+	if def == "" {
+		def = "not documented"
+	}
+	marker := "  "
+	if !won {
+		marker = s.set.Render("● ")
+	}
+	b.WriteString(marker + s.subtle.Render(fmt.Sprintf("%-9s", "default")) + " " + s.subtle.Render(short(def, max(4, w-12))) + "\n")
+	if !store.Allowed(st, target) {
+		b.WriteString("\n" + s.warn.Width(w).Render(notReadHere(st, target)) + "\n")
+	}
+	return b.String()
+}
+
+type hint struct{ key, desc string }
+
+// hints are the keys that do something useful right now, most useful first.
+func (m *model) hints() []hint {
+	l := m.activeList()
+	switch {
+	case m.mode == modeHelp:
+		return []hint{{"any key", "close"}}
+	case m.mode == modeConfirmUnset:
+		return []hint{{"y", "remove"}, {"n", "keep"}}
+	case l.SettingFilter():
+		return []hint{{"enter", "apply filter"}, {"esc", "cancel"}}
+	}
+	var h []hint
+	if l.IsFiltered() {
+		h = append(h, hint{"esc", "clear filter"})
+	}
+	st := m.selected()
+	if m.toolsFocus {
+		h = append(h, hint{"tab", "turn on/off"}, hint{"s", "target file"}, hint{"/", "filter"}, hint{"←", "settings"})
+	} else {
+		h = append(h, hint{"enter", "edit"})
+		if st != nil && cyclable(st) {
+			h = append(h, hint{"tab", "next value"})
+		}
+		if st != nil {
+			if f := m.files[m.targetScope(st)]; f != nil {
+				if _, ok := f.Get(st.Key); ok {
+					h = append(h, hint{"u", "remove"})
+				}
+			}
+		}
+		h = append(h, hint{"s", "target file"}, hint{"/", "filter"}, hint{"[ ]", "section"}, hint{"→", "tools"})
+	}
+	return append(h, hint{"o", "docs"}, hint{"r", "reload"})
+}
+
+func cyclable(st *schema.Setting) bool {
+	return st.Kind == schema.KindBool || (st.Kind == schema.KindEnum || st.Kind == schema.KindEnumOrString) && len(st.Options) > 0
+}
+
+// footer fits as many hints as the width allows and always keeps help and quit.
+func (m *model) footer() string {
+	render := func(h hint) string { return m.st.keyCap.Render(h.key) + " " + m.st.subtle.Render(h.desc) }
+	tail := []hint{{"?", "all keys"}, {"q", "quit"}}
+	if m.mode != modeBrowse {
+		tail = nil
+	}
+	var tailParts []string
+	for _, h := range tail {
+		tailParts = append(tailParts, render(h))
+	}
+	tailView := strings.Join(tailParts, "   ")
+	var parts []string
+	used := lipgloss.Width(tailView)
+	for _, h := range m.hints() {
+		r := render(h)
+		if used+lipgloss.Width(r)+3 > m.width-1 {
+			break
+		}
+		parts = append(parts, r)
+		used += lipgloss.Width(r) + 3
+	}
+	left := " " + strings.Join(parts, "   ")
+	if tailView == "" {
+		return left
+	}
+	return left + strings.Repeat(" ", max(3, m.width-lipgloss.Width(left)-lipgloss.Width(tailView)-1)) + tailView
+}
+
+func (m *model) header() string {
+	var chips []string
+	for _, sc := range []store.Scope{store.ScopeUser, store.ScopeProject, store.ScopeLocal} {
+		if sc == m.scope {
+			chips = append(chips, m.st.chipOn.Render(string(sc)))
+		} else {
+			chips = append(chips, m.st.chip.Render(string(sc)))
+		}
+	}
+	target := m.targetScope(m.selected())
+	path := tildify(store.Path(target, m.cwd))
+	if target == store.ScopeGlobal {
+		path += "  (this key always lives here)"
+	}
+	return " " + m.st.title.Render("ccfg") + "   " + m.st.subtle.Render("Target file ") + strings.Join(chips, "") + "  " + m.st.subtle.Render(path)
+}
+
+func (m *model) statusLine() string {
+	var status string
+	switch {
+	case m.mode == modeConfirmUnset:
+		if st := m.selected(); st != nil {
+			sc := m.targetScope(st)
+			status = m.st.warn.Render(fmt.Sprintf("Remove %s from the %s file (%s)?", st.Key, sc, tildify(store.Path(sc, m.cwd))))
+		}
+	case m.status != "" && m.statusErr:
+		status = m.st.err.Render("✕ " + m.status)
+	case m.status != "":
+		status = m.st.ok.Render("✓ " + m.status)
+	}
+	for _, sc := range store.All {
+		if err := m.errs[sc]; err != nil {
+			status += "  " + m.st.err.Render(fmt.Sprintf("Can't read the %s file: %v", sc, err))
+		}
+	}
+	return " " + status
+}
+
+// listFooter shows where the cursor is: the current section and position.
+func (m *model) listFooter(width int) string {
+	l := m.activeList()
+	n := len(l.VisibleItems())
+	pos := ""
+	if n > 0 {
+		pos = fmt.Sprintf("%d/%d", l.Index()+1, n)
+	}
+	left := ""
+	switch {
+	case l.IsFiltered() && !l.SettingFilter():
+		left = "filter: " + l.FilterValue()
+	case m.toolsFocus:
+		left = "off = listed in permissions.deny"
+	default:
+		if st := m.selected(); st != nil {
+			left = st.Section
+		}
+	}
+	left = short(left, max(1, width-lipgloss.Width(pos)-2))
+	return m.st.subtle.Render(left + strings.Repeat(" ", max(1, width-lipgloss.Width(left)-lipgloss.Width(pos))) + pos)
+}
+
+func (m *model) keysOverlay() string {
+	s := m.st
+	groups := []struct {
+		title string
+		rows  []hint
+	}{
+		{"Move", []hint{{"↑ ↓  j k", "move up and down"}, {"[ ]", "previous or next section"}, {"← →", "switch between Settings and Tools"}, {"pgup pgdn", "scroll the details"}, {"/", "filter by key or section"}, {"esc", "clear the filter or message"}}},
+		{"Change", []hint{{"enter", "edit the setting, or turn the tool on or off"}, {"tab", "next value, or turn the tool on or off"}, {"u", "remove the key from the target file"}, {"s", "switch the target file: user, project, local"}}},
+		{"Other", []hint{{"o", "open the docs page in your browser"}, {"r", "reload the settings files from disk"}, {"q", "quit"}}},
+	}
+	var b strings.Builder
+	for i, g := range groups {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(s.label.Render(g.title) + "\n")
+		for _, r := range g.rows {
+			b.WriteString("  " + s.accent.Render(fmt.Sprintf("%-10s", r.key)) + "  " + s.value.Render(r.desc) + "\n")
+		}
+	}
+	if m.height >= 28 {
+		b.WriteString("\n" + s.subtle.Render("Edits save as soon as you confirm them."))
+	}
+	return s.paneFocus.Padding(0, 2).Render(strings.TrimRight(b.String(), "\n"))
 }
 
 func (m *model) View() tea.View {
@@ -576,50 +813,33 @@ func (m *model) View() tea.View {
 		return v
 	}
 	if m.mode == modeEdit && m.edit != nil {
-		v.SetContent(lipgloss.NewStyle().Padding(1, 2).Render(m.edit.form.View()))
+		st := m.edit.st
+		sc := m.targetScope(st)
+		head := m.st.subtle.Render("Editing ") + m.st.key.Render(st.Key) + m.st.subtle.Render(" in the ") +
+			m.st.accent.Bold(true).Render(string(sc)) + m.st.subtle.Render(" file  "+tildify(store.Path(sc, m.cwd)))
+		head = ansi.Truncate(head, max(1, m.width-4), "…") + "\n" + m.st.subtle.Render("esc cancels without saving")
+		v.SetContent(lipgloss.NewStyle().Padding(1, 2).MaxWidth(m.width).Render(head + "\n\n" + m.edit.form.View()))
 		return v
 	}
 
-	// header
-	var badges []string
-	for _, sc := range []store.Scope{store.ScopeUser, store.ScopeProject, store.ScopeLocal} {
-		if sc == m.scope {
-			badges = append(badges, m.st.badgeOn.Render(string(sc)))
-		} else {
-			badges = append(badges, m.st.badge.Render(string(sc)))
-		}
+	bodyHeight := m.height - chromeRows
+	var body string
+	if m.mode == modeHelp {
+		body = lipgloss.Place(m.width, bodyHeight, lipgloss.Center, lipgloss.Center, m.keysOverlay())
+	} else {
+		lw := m.listWidth()
+		leftView := lipgloss.JoinVertical(lipgloss.Left, m.activeList().View(), m.listFooter(lw-4))
+		left := m.st.paneFocus.Width(lw).Height(bodyHeight).Render(leftView)
+		right := m.st.pane.Width(m.doc.Width() + 4).Height(bodyHeight).Render(m.doc.View())
+		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
-	header := lipgloss.JoinHorizontal(lipgloss.Center,
-		m.st.title.Render(" claude-config-cli "),
-		m.st.subtle.Render(" write to: "),
-		strings.Join(badges, ""),
-	)
-
-	left := m.st.paneFocus.Width(m.listWidth()).Height(m.height - 3).Render(m.activeList().View())
-	right := m.st.pane.Width(m.doc.Width() + 4).Height(m.height - 3).Render(m.doc.View())
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-
-	helpText := "←/→ pane · tab toggle · enter edit · / filter · r reload · q quit"
-	if m.width >= 140 {
-		helpText = "←/→ pane · tab toggle · enter edit · s scope · u unset · [ ] section · / filter · o docs · pgup/dn details · r reload · q quit"
-	}
-	help := m.st.help.Render(helpText)
-	status := ""
-	if m.mode == modeConfirmUnset {
-		if st := m.selected(); st != nil {
-			status = m.st.warn.Render(fmt.Sprintf("Remove %s from %s? (y/n)", st.Key, m.targetScope(st)))
-		}
-	} else if m.status != "" {
-		if m.statusErr {
-			status = m.st.err.Render(m.status)
-		} else {
-			status = m.st.ok.Render(m.status)
-		}
-	}
-	for sc, err := range m.errs {
-		status += "  " + m.st.err.Render(fmt.Sprintf("[%s file unreadable: %v]", sc, err))
-	}
-	v.SetContent(lipgloss.JoinVertical(lipgloss.Left, header, body, lipgloss.NewStyle().Width(m.width).MaxWidth(m.width).MaxHeight(1).Render(status), lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(1).Render(help)))
+	line := lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(1)
+	v.SetContent(lipgloss.JoinVertical(lipgloss.Left,
+		line.Render(m.header()),
+		body,
+		line.Width(m.width).Render(m.statusLine()),
+		line.Render(m.footer()),
+	))
 	return v
 }
 
@@ -642,11 +862,19 @@ func substringFilter(term string, targets []string) []list.Rank {
 	return out
 }
 
-func short(s string, n int) string {
-	if len(s) <= n {
-		return s
+// short truncates by display width so multi-byte values are never cut mid-rune.
+func short(s string, n int) string { return ansi.Truncate(s, n, "…") }
+
+// tildify shows paths under the home directory as ~/…
+func tildify(p string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" && strings.HasPrefix(p, home) {
+		return "~" + strings.TrimPrefix(p, home)
 	}
-	return s[:n-1] + "…"
+	return p
+}
+
+func notReadHere(st *schema.Setting, sc store.Scope) string {
+	return fmt.Sprintf("Claude Code doesn't read %s from the %s file (allowed: %s). Press s to pick another target file.", st.Key, sc, st.Scope)
 }
 
 func openURL(u string) {

@@ -2,10 +2,11 @@ package tui
 
 import (
 	"reflect"
-	"strings"
+	"regexp"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/jorden-parker/claude-config-cli/internal/store"
 )
 
@@ -64,8 +65,11 @@ func TestToolToggleUsesTargetAndShowsInheritedDeny(t *testing.T) {
 		t.Fatalf("project denies = %v", got)
 	}
 	pressTab(m)
-	if !strings.Contains(m.toolDoc(m.selected()), "Disabled in managed") {
+	if !regexp.MustCompile(`managed\s+disabled`).MatchString(ansi.Strip(m.toolDoc(m.selected(), 80))) {
 		t.Fatal("managed deny hidden")
+	}
+	if it := m.tools.SelectedItem().(item); !it.off || it.scope != "managed" {
+		t.Fatalf("row does not show the managed deny: %+v", it)
 	}
 	if got, _ := toolRules(m.files[store.ScopeManaged]); !reflect.DeepEqual(got, []string{"NotebookEdit"}) {
 		t.Fatal("changed managed denies")

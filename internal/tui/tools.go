@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
 	"github.com/jorden-parker/claude-config-cli/internal/store"
 )
@@ -52,18 +53,28 @@ func toolRules(f *store.File) ([]string, error) {
 	}
 }
 
-func (m *model) toolSummary(st *schema.Setting) string {
-	name := toolName(st)
-	rules, err := toolRules(m.files[m.scope])
-	if err != nil {
-		return "Tools · invalid permissions.deny"
-	}
-	for _, rule := range rules {
-		if rule == name {
-			return fmt.Sprintf("Tools · disabled [%s]", m.scope)
+// toolDeniedIn returns the highest-precedence file whose permissions.deny
+// lists the bare tool name, or "" if the tool is on everywhere.
+func (m *model) toolDeniedIn(st *schema.Setting) store.Scope {
+	for _, sc := range []store.Scope{store.ScopeManaged, store.ScopeLocal, store.ScopeProject, store.ScopeUser} {
+		if denies(m.files[sc], toolName(st)) {
+			return sc
 		}
 	}
-	return fmt.Sprintf("Tools · enabled [%s]", m.scope)
+	return ""
+}
+
+func denies(f *store.File, name string) bool {
+	if f == nil {
+		return false
+	}
+	rules, _ := toolRules(f)
+	for _, rule := range rules {
+		if rule == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *model) toggleTool(st *schema.Setting) tea.Cmd {
@@ -73,7 +84,7 @@ func (m *model) toggleTool(st *schema.Setting) tea.Cmd {
 		return nil
 	}
 	if err := m.errs[sc]; err != nil {
-		m.setStatus("Cannot edit unreadable settings: "+err.Error(), true)
+		m.setStatus("Can't edit a settings file that failed to load: "+err.Error(), true)
 		return nil
 	}
 	f := m.files[sc]
@@ -92,10 +103,10 @@ func (m *model) toggleTool(st *schema.Setting) tea.Cmd {
 			next = append(next, rule)
 		}
 	}
-	state := "enabled"
+	state := "on"
 	if !disabled {
 		next = append(next, name)
-		state = "disabled"
+		state = "off"
 	}
 	// Work on a copy so a failed save does not change the displayed state.
 	var data map[string]any
@@ -110,30 +121,51 @@ func (m *model) toggleTool(st *schema.Setting) tea.Cmd {
 		return nil
 	}
 	if err := updated.Save(); err != nil {
-		m.setStatus("save failed: "+err.Error(), true)
+		m.setStatus("Save failed: "+err.Error(), true)
 		return nil
 	}
 	m.files[sc] = &updated
-	m.setStatus(fmt.Sprintf("%s %s → %s", name, state, f.Path), false)
+	m.setStatus(fmt.Sprintf("Turned %s %s in %s", name, state, tildify(f.Path)), false)
 	return m.afterWrite()
 }
 
-func (m *model) toolDoc(st *schema.Setting) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n\n%s\n\nTab or Enter: enable/disable in the target file.\nDisabling adds the bare tool name to permissions.deny.\nEnabling removes that exact entry; normal permission prompts still apply.\nScoped rules and denies in other files remain in effect.\nAvailability also depends on your Claude Code version and session.\n", toolName(st), m.toolSummary(st))
-	for _, sc := range []store.Scope{store.ScopeUser, store.ScopeProject, store.ScopeLocal, store.ScopeManaged} {
-		rules, err := toolRules(m.files[sc])
-		if err != nil {
-			fmt.Fprintf(&b, "\n%s: %v", sc, err)
-			continue
-		}
-		for _, rule := range rules {
-			if rule == toolName(st) {
-				fmt.Fprintf(&b, "\nDisabled in %s", sc)
-				break
-			}
-		}
+func (m *model) toolDoc(st *schema.Setting, w int) string {
+	s := m.st
+	name := toolName(st)
+	state := s.ok.Render("on")
+	if m.toolDeniedIn(st) != "" {
+		state = s.err.Render("off")
 	}
-	fmt.Fprintf(&b, "\n\nTarget file: %s (%s)\n", m.scope, store.Path(m.scope, m.cwd))
+	var b strings.Builder
+	b.WriteString(s.title.Render(name) + "\n" + s.subtle.Render("Claude Code tool  ") + state + "\n\n")
+	b.WriteString(s.label.Render("Where it's turned off") + "  " + s.subtle.Render("any file can turn it off") + "\n")
+	for _, sc := range []store.Scope{store.ScopeManaged, store.ScopeLocal, store.ScopeProject, store.ScopeUser} {
+		label := s.value.Render(fmt.Sprintf("%-9s", sc))
+		if sc == m.scope {
+			label = s.accent.Bold(true).Render(fmt.Sprintf("%-9s", sc))
+		}
+		val := s.faint.Render("–")
+		if _, err := toolRules(m.files[sc]); err != nil {
+			val = s.err.Render(err.Error())
+		} else if denies(m.files[sc], name) {
+			val = s.err.Render("disabled")
+		}
+		line := "  " + label + " " + val
+		tag := ""
+		switch {
+		case sc == m.scope:
+			tag = s.accent.Render("◂ target file")
+		case sc == store.ScopeManaged:
+			tag = s.subtle.Render("read-only")
+		}
+		if tag != "" {
+			line += strings.Repeat(" ", max(2, w-lipgloss.Width(line)-lipgloss.Width(tag))) + tag
+		}
+		b.WriteString(line + "\n")
+	}
+	wrap := lipgloss.NewStyle().Width(w)
+	b.WriteString("\n" + wrap.Render(fmt.Sprintf("Press tab or enter to turn %s on or off in the target file.", name)) + "\n\n")
+	b.WriteString(s.subtle.Render(wrap.Render(fmt.Sprintf("Turning it off adds %q to permissions.deny. Turning it on removes that entry; the usual permission prompts still apply. Narrower rules such as %s(…) stay as they are. Whether a tool exists also depends on your Claude Code version.", name, name))) + "\n\n")
+	b.WriteString(s.accent.Render("https://code.claude.com/docs/en/tools-reference") + "\n")
 	return b.String()
 }
