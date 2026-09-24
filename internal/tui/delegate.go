@@ -34,8 +34,8 @@ func (d rowDelegate) Render(w io.Writer, lm list.Model, index int, li list.Item)
 	gutter := "  "
 	keyStyle := s.value
 	if selected {
-		gutter = s.accent.Render("▌ ")
-		keyStyle = s.key
+		gutter = s.accent.Render("❯ ")
+		keyStyle = s.selection
 	}
 	if it.st.Deprecated != "" {
 		keyStyle = keyStyle.Foreground(s.p.dim).Strikethrough(true)
@@ -50,11 +50,13 @@ func (d rowDelegate) Render(w io.Writer, lm list.Model, index int, li list.Item)
 	case it.st.Deprecated != "":
 		right = s.subtle.Render("removed")
 	case it.off:
-		right = s.err.Render("off") + " " + s.subtle.Render(it.scope)
+		right = s.err.Render("○ off") + " " + s.subtle.Render(it.scope)
 	case it.tool:
-		right = s.subtle.Render("on")
+		right = s.ok.Render("● on")
 	case it.val != "":
 		right = s.set.Render(ansi.Truncate(it.val, max(4, width/3), "…")) + " " + s.subtle.Render(it.scope)
+	default:
+		right = s.subtle.Render("default")
 	}
 
 	name := it.name

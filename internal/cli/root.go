@@ -45,14 +45,18 @@ func cwd() string {
 func Root() *cobra.Command {
 	root := &cobra.Command{
 		Use:   name,
-		Short: "Browse and edit every Claude Code setting",
+		Short: "Your little workshop for Claude Code settings",
 		Long: name + ` is a terminal UI and CLI for Claude Code's settings files.
 ccfg is its short name; both run the same commands.
+
+A little workshop for big ideas. Browse settings, tend your variable garden,
+and give Claude Code a few carefully chosen superpowers.
 
 Every key, its allowed values, and its default come from the official
 settings reference: https://code.claude.com/docs/en/settings-reference
 
-Run with no arguments to open the interactive editor.`,
+Run with no arguments to open the interactive editor.
+Pull up a terminal. Let's tinker.`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return tui.Run(cwd())

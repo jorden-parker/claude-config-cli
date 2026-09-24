@@ -80,6 +80,9 @@ func (m *model) autoGroup() string {
 }
 
 func (m *model) levelItems() []list.Item {
+	if m.section() == envSection {
+		return m.envItems()
+	}
 	prefix := m.levelPrefix()
 	parents := m.parents()
 	seen := map[string]bool{}
@@ -140,6 +143,7 @@ func (m *model) searchItems() []list.Item {
 		}
 		out = append(out, row)
 	}
+	out = append(out, m.envItems()...)
 	return append(out, m.toolItems()...)
 }
 
@@ -212,6 +216,9 @@ func (m *model) back() tea.Cmd {
 func (m *model) reveal(key string) {
 	m.sideFocus = false
 	section := toolsSection
+	if strings.HasPrefix(key, "env.") {
+		section = envSection
+	}
 	if st := m.sch.Get(key); st != nil {
 		section = st.Section
 	}
@@ -300,6 +307,7 @@ const toolsSection = "Tools"
 
 // shortNames label the sidebar; the pane title keeps the full section name.
 var shortNames = map[string]string{
+	envSection:                           "Environment",
 	"Model and responses":                "Model",
 	"Permission settings":                "Permissions",
 	"Sandbox settings":                   "Sandbox",
@@ -348,6 +356,14 @@ func (m *model) startSearch() {
 // many tools are turned off.
 func (m *model) sectionCount(section string) int {
 	n := 0
+	if section == envSection {
+		for _, li := range m.envItems() {
+			if li.(item).scope != "" {
+				n++
+			}
+		}
+		return n
+	}
 	for i := range m.sch.Settings {
 		st := &m.sch.Settings[i]
 		if st.Section == section && !m.parents()[st.Key] {
@@ -370,7 +386,7 @@ func (m *model) sectionCount(section string) int {
 // how many of its keys have a value.
 func (m *model) sidebar(w, h int) string {
 	s := m.st
-	lines := []string{s.subtle.Render("Sections"), ""}
+	lines := []string{s.title.Render("⌂ Sections"), ""}
 	for i, sec := range m.sections {
 		name := shortName(sec)
 		right := ""
@@ -380,7 +396,7 @@ func (m *model) sidebar(w, h int) string {
 		name = short(name, max(1, w-2-lipgloss.Width(right)-1))
 		style, gutter := s.value, "  "
 		if i == m.sec {
-			style, gutter = s.key, s.accent.Render("▌ ")
+			style, gutter = s.selection, s.accent.Render("❯ ")
 			if !m.sideFocus {
 				gutter = s.subtle.Render("▌ ")
 			}

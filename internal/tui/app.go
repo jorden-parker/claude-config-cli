@@ -32,10 +32,12 @@ const (
 	modeEdit
 	modeConfirmUnset
 	modeHelp
+	modePalette
+	modeScope
 )
 
 // editChrome is the rows around the edit form: padding plus its heading.
-const editChrome = 6
+const editChrome = 10
 
 type item struct {
 	header  bool   // section heading row; never selected
@@ -96,6 +98,11 @@ type model struct {
 	edit          *editState
 	status        string
 	statusErr     bool
+	palette       *huh.Form
+	destination   int
+	details       bool
+	scopeChoice   store.Scope
+	guideOffset   int
 
 	path      []string // open group in the Settings pane, e.g. [sandbox network]
 	searching bool     // Settings list holds every key while a filter is active
@@ -114,7 +121,8 @@ func newModel(cwd string) *model {
 	m := &model{cwd: cwd, sch: schema.Load(), scope: store.ScopeUser, isDark: true}
 	m.st = newStyles(true)
 	m.reload()
-	m.sections = m.sch.Sections()
+	m.sections = append([]string(nil), m.sch.Sections()...)
+	m.sections = append(m.sections, envSection)
 	if !contains(m.sections, toolsSection) {
 		m.sections = append(m.sections, toolsSection)
 	}
@@ -162,6 +170,9 @@ func (m *model) applyStyles() {
 func (m *model) paneTitle() string {
 	if m.searching {
 		return m.st.tabOn.Render("Search all settings")
+	}
+	if m.section() == envSection {
+		return m.st.ok.Render("✿ Environment")
 	}
 	if len(m.path) == 0 {
 		return m.st.tabOn.Render(m.section())
@@ -244,18 +255,30 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
+		if m.palette != nil {
+			m.palette.WithWidth(max(1, m.dialogWidth()-4)).WithHeight(max(1, m.height-editChrome))
+		}
 		if m.edit != nil {
-			m.edit.form = m.edit.form.WithWidth(m.width - 4).WithHeight(m.height - editChrome)
+			m.edit.form = m.edit.form.WithWidth(max(1, m.dialogWidth()-4)).WithHeight(max(1, m.height-editChrome))
 		}
 		return m, nil
 	}
 
 	switch m.mode {
+	case modePalette, modeScope:
+		return m.updatePalette(msg)
 	case modeEdit:
 		return m.updateEdit(msg)
 	case modeHelp:
-		if _, ok := msg.(tea.KeyPressMsg); ok {
-			m.mode = modeBrowse
+		if k, ok := msg.(tea.KeyPressMsg); ok {
+			switch k.String() {
+			case "down", "j", "pgdown":
+				m.guideOffset++
+			case "up", "k", "pgup":
+				m.guideOffset = max(0, m.guideOffset-1)
+			default:
+				m.mode = modeBrowse
+			}
 		}
 		return m, nil
 	case modeConfirmUnset:
@@ -276,17 +299,26 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 	k, isKey := msg.(tea.KeyPressMsg)
 	if isKey && !m.list.SettingFilter() {
 		switch {
+		case k.String() == "S":
+			return m, m.openScopePicker()
+		case k.String() == "ctrl+d":
+			m.details = !m.details
+			m.layout()
+			return m, nil
+		case k.String() == "ctrl+k":
+			return m, m.openPalette()
 		case key.Matches(k, keys.quit):
 			return m, tea.Quit
 		case key.Matches(k, keys.help):
 			m.mode = modeHelp
+			m.guideOffset = 0
 			return m, nil
 		case key.Matches(k, keys.scope):
 			m.cycleScope()
 			return m, m.afterWrite()
 		case key.Matches(k, keys.reload):
 			m.reload()
-			m.setStatus("Reloaded settings files", false)
+			m.setStatus("Reloaded settings files. Fresh off the workbench.", false)
 			return m, m.afterWrite()
 		case key.Matches(k, keys.sectionNext), key.Matches(k, keys.sectionPrev):
 			if k.String() == "]" {
@@ -307,6 +339,10 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if isKey && !m.list.SettingFilter() {
 		switch {
+		case key.Matches(k, keys.back) && m.details:
+			m.details = false
+			m.layout()
+			return m, nil
 		case key.Matches(k, keys.back) && len(m.path) > 0 && !m.list.IsFiltered():
 			return m, m.back()
 		case k.String() == "left" && !m.list.IsFiltered():
@@ -350,6 +386,9 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(k, keys.docs):
 			if st := m.selected(); st != nil {
 				url := st.DocURL()
+				if isEnv(st) {
+					url = "https://code.claude.com/docs/en/env-vars"
+				}
 				if toolName(st) != "" {
 					url = "https://code.claude.com/docs/en/tools-reference"
 				}
@@ -436,7 +475,7 @@ func (m *model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case huh.StateAborted:
 		m.mode = modeBrowse
 		m.edit = nil
-		m.setStatus("Edit cancelled. Nothing saved.", false)
+		m.setStatus("Edit cancelled. Nothing saved. Back to the drawing board.", false)
 	case huh.StateCompleted:
 		v, err := m.edit.result()
 		st := m.edit.st
@@ -445,6 +484,9 @@ func (m *model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err != nil {
 			m.setStatus(err.Error(), true)
 			return m, nil
+		}
+		if isEnv(st) {
+			return m, m.saveEnv(st, v, false)
 		}
 		sc := m.targetScope(st)
 		f := m.files[sc]
@@ -476,7 +518,7 @@ func (m *model) startEdit() tea.Cmd {
 		return nil
 	}
 	cur, _ := m.files[sc].Get(st.Key)
-	m.edit = newEdit(st, cur, m.sch, m.width-4, m.height-editChrome, m.isDark)
+	m.edit = newEdit(st, cur, m.sch, max(1, m.dialogWidth()-4), max(1, m.height-editChrome), m.isDark)
 	m.mode = modeEdit
 	return m.edit.form.Init()
 }
@@ -527,6 +569,9 @@ func (m *model) cycleValue() tea.Cmd {
 		m.setStatus(err.Error(), true)
 		return nil
 	}
+	if isEnv(st) {
+		return m.saveEnv(st, v, false)
+	}
 	if err := f.Set(st.Key, v); err != nil {
 		m.setStatus(err.Error(), true)
 		return nil
@@ -543,6 +588,9 @@ func (m *model) doUnset() tea.Cmd {
 	st := m.selected()
 	if st == nil {
 		return nil
+	}
+	if isEnv(st) {
+		return m.saveEnv(st, nil, true)
 	}
 	f := m.files[m.targetScope(st)]
 	f.Unset(st.Key)
@@ -585,11 +633,17 @@ func (m *model) sideWidth() int {
 }
 
 func (m *model) listWidth() int {
-	return min(56, max(26, (m.width-m.sideWidth())*2/5))
+	if m.width < 100 {
+		if m.width < 60 {
+			return m.width
+		}
+		return m.width - m.sideWidth()
+	}
+	return min(60, max(30, (m.width-m.sideWidth())/2))
 }
 
 // Rows outside the panes: header, status line, key hints.
-const chromeRows = 3
+const chromeRows = 5
 
 func (m *model) layout() {
 	if m.width == 0 {
@@ -598,7 +652,11 @@ func (m *model) layout() {
 	lw := m.listWidth()
 	inner := max(1, m.height-chromeRows-2) // minus pane borders
 	m.list.SetSize(lw-4, max(1, inner-1))  // minus the position line
-	m.doc.SetWidth(max(1, m.width-m.sideWidth()-lw-4))
+	dw := m.width - m.sideWidth() - lw - 4
+	if m.width < 100 || m.details {
+		dw = m.width - 4
+	}
+	m.doc.SetWidth(max(1, dw))
 	m.doc.SetHeight(inner)
 	m.refreshDoc()
 }
@@ -606,12 +664,17 @@ func (m *model) layout() {
 func (m *model) refreshDoc() {
 	st := m.selected()
 	if st == nil {
-		m.doc.SetContent(m.st.subtle.Width(max(1, m.doc.Width())).Render("Nothing matches the filter. Press esc to clear it."))
+		m.doc.SetContent(m.st.subtle.Width(max(1, m.doc.Width())).Render("No treasures found. Nothing matches the filter. Press esc to clear it."))
 		return
 	}
 	w := m.doc.Width()
 	if w < 20 {
 		w = 60
+	}
+	if isEnv(st) {
+		m.doc.SetContent(m.envDoc(st, w))
+		m.doc.GotoTop()
+		return
 	}
 	if toolName(st) != "" {
 		m.doc.SetContent(lipgloss.NewStyle().Width(w).Render(m.toolDoc(st, w)))
@@ -701,15 +764,21 @@ func (m *model) hints() []hint {
 	l := m.activeList()
 	switch {
 	case m.mode == modeHelp:
-		return []hint{{"any key", "close"}}
+		return []hint{{"esc", "close"}, {"↑ ↓", "scroll"}}
 	case m.mode == modeConfirmUnset:
 		return []hint{{"y", "remove"}, {"n", "keep"}}
 	case l.SettingFilter():
 		return []hint{{"enter", "apply filter"}, {"esc", "cancel"}}
 	}
 	var h []hint
+	if m.details {
+		return []hint{{"esc", "back"}, {"pgup pgdn", "scroll"}, {"enter", "edit"}, {"o", "docs"}}
+	}
 	if m.sideFocus {
 		return []hint{{"↑ ↓", "section"}, {"→ enter", "open"}, {"/", "search all"}, {"s", "target file"}, {"r", "reload"}}
+	}
+	if m.width < 100 {
+		h = append(h, hint{"ctrl+d", "details"})
 	}
 	if l.IsFiltered() {
 		h = append(h, hint{"esc", "clear search"})
@@ -740,7 +809,7 @@ func (m *model) hints() []hint {
 		}
 		h = append(h, hint{"s", "target file"}, hint{"/", "search all"}, hint{"[ ]", "section"})
 	}
-	return append(h, hint{"o", "docs"}, hint{"r", "reload"})
+	return append(h, hint{"ctrl+d", "details"}, hint{"o", "docs"}, hint{"r", "reload"})
 }
 
 func cyclable(st *schema.Setting) bool {
@@ -750,7 +819,7 @@ func cyclable(st *schema.Setting) bool {
 // footer fits as many hints as the width allows and always keeps help and quit.
 func (m *model) footer() string {
 	render := func(h hint) string { return m.st.keyCap.Render(h.key) + " " + m.st.subtle.Render(h.desc) }
-	tail := []hint{{"?", "all keys"}, {"q", "quit"}}
+	tail := []hint{{"ctrl+k", "explore"}, {"?", "all keys"}, {"q", "quit"}}
 	if m.mode != modeBrowse {
 		tail = nil
 	}
@@ -777,20 +846,31 @@ func (m *model) footer() string {
 }
 
 func (m *model) header() string {
+	mascot := "˙ᵕ˙"
+	if m.statusErr {
+		mascot = "˙︵˙"
+	}
+	brand := m.st.badge.Render(mascot+" ccfg") + " " + m.st.title.Render("The settings workshop")
+	trail := m.st.subtle.Render("ctrl+k explore  ·  ? field guide")
+	if m.width >= 90 {
+		brand += strings.Repeat(" ", max(1, m.width-lipgloss.Width(brand)-lipgloss.Width(trail)-2)) + trail
+	}
 	var chips []string
+	target := m.targetScope(m.selected())
 	for _, sc := range []store.Scope{store.ScopeUser, store.ScopeProject, store.ScopeLocal} {
-		if sc == m.scope {
-			chips = append(chips, m.st.chipOn.Render(string(sc)))
+		if sc == target {
+			chips = append(chips, m.st.chipOn.Render("● "+string(sc)))
 		} else {
 			chips = append(chips, m.st.chip.Render(string(sc)))
 		}
 	}
-	target := m.targetScope(m.selected())
-	path := tildify(store.Path(target, m.cwd))
 	if target == store.ScopeGlobal {
-		path += "  (this key always lives here)"
+		chips = append(chips, m.st.chipOn.Render("● global"))
 	}
-	return " " + m.st.title.Render("ccfg") + "   " + m.st.subtle.Render("Target file ") + strings.Join(chips, "") + "  " + m.st.subtle.Render(path)
+	path := tildify(store.Path(target, m.cwd))
+	line := " " + m.st.subtle.Render("Write to ") + strings.Join(chips, "")
+	line += " " + m.st.subtle.Render(path)
+	return short(brand, m.width) + "\n" + short(line, m.width) + "\n" + m.st.faint.Render(strings.Repeat("─", max(1, m.width)))
 }
 
 func (m *model) statusLine() string {
@@ -805,6 +885,8 @@ func (m *model) statusLine() string {
 		status = m.st.err.Render("✕ " + m.status)
 	case m.status != "":
 		status = m.st.ok.Render("✓ " + m.status)
+	default:
+		status = m.st.subtle.Render(m.workshopHint())
 	}
 	for _, sc := range store.All {
 		if err := m.errs[sc]; err != nil {
@@ -837,6 +919,8 @@ func (m *model) listFooter(width int) string {
 		left = "filter: " + l.FilterValue()
 	case toolName(m.selected()) != "":
 		left = "off = listed in permissions.deny"
+	case m.section() == envSection:
+		left = "✿ strings, with roots"
 	case len(m.path) > 0:
 		left = "esc back"
 	}
@@ -851,12 +935,12 @@ func (m *model) keysOverlay() string {
 		rows  []hint
 	}{
 		{"Move", []hint{{"↑ ↓  j k", "move up and down"}, {"[ ]", "previous or next section"}, {"← →", "move between sections and their keys"}, {"enter", "open a group such as permissions"}, {"esc ←", "go back out of a group"}, {"/", "search every key in every section"}, {"pgup pgdn", "scroll the details"}}},
-		{"Change", []hint{{"enter", "edit the setting, or turn a tool on or off"}, {"tab", "next value, or turn the tool on or off"}, {"u", "remove the key from the target file"}, {"s", "switch the target file: user, project, local"}}},
-		{"Other", []hint{{"o", "open the docs page in your browser"}, {"r", "reload the settings files from disk"}, {"q", "quit"}}},
+		{"Change", []hint{{"enter", "edit the setting, or turn a tool on or off"}, {"tab", "next value, or turn the tool on or off"}, {"u", "remove the key from the target file"}, {"s / S", "switch the target file / open file picker"}}},
+		{"Other", []hint{{"ctrl+k", "jump to a section or discover a setting"}, {"ctrl+d", "expand details / return to settings"}, {"o", "open the docs page in your browser"}, {"r", "reload the settings files from disk"}, {"q", "quit"}}},
 	}
 	var b strings.Builder
 	for i, g := range groups {
-		if i > 0 {
+		if i > 0 && m.height >= 30 {
 			b.WriteString("\n")
 		}
 		b.WriteString(s.label.Render(g.title) + "\n")
@@ -865,32 +949,54 @@ func (m *model) keysOverlay() string {
 		}
 	}
 	if m.height >= 28 {
-		b.WriteString("\n" + s.subtle.Render("Edits save as soon as you confirm them."))
+		b.WriteString("\n" + s.subtle.Render("Small tweaks, big possibilities. Edits save as soon as you confirm them."))
 	}
-	return s.paneFocus.Padding(0, 2).Render(strings.TrimRight(b.String(), "\n"))
+	content := lipgloss.NewStyle().Width(max(1, m.width-8)).Render(strings.TrimRight(b.String(), "\n"))
+	lines := strings.Split(content, "\n")
+	h := max(1, m.height-chromeRows-2)
+	start := min(m.guideOffset, max(0, len(lines)-h))
+	return s.paneFocus.Width(m.width).Padding(0, 2).Render(strings.Join(lines[start:min(len(lines), start+h)], "\n"))
 }
 
 func (m *model) View() tea.View {
 	v := tea.NewView("")
 	v.AltScreen = true
 	if m.width == 0 {
-		v.SetContent("loading…")
+		v.SetContent("˙ᵕ˙ Opening the settings workshop…")
+		return v
+	}
+	if (m.mode == modePalette || m.mode == modeScope) && m.palette != nil {
+		title, subtitle := "✧ The curiosity cabinet", "Find a new corner of your configuration."
+		if m.mode == modeScope {
+			title, subtitle = "⌂ A home for your tweaks", "Choose where your next edits will be saved."
+		}
+		v.SetContent(m.dialog(title, subtitle, m.palette.View(), "esc back · enter choose"))
 		return v
 	}
 	if m.mode == modeEdit && m.edit != nil {
-		st := m.edit.st
-		sc := m.targetScope(st)
-		head := m.st.subtle.Render("Editing ") + m.st.key.Render(st.Key) + m.st.subtle.Render(" in the ") +
-			m.st.accent.Bold(true).Render(string(sc)) + m.st.subtle.Render(" file  "+tildify(store.Path(sc, m.cwd)))
-		head = ansi.Truncate(head, max(1, m.width-4), "…") + "\n" + m.st.subtle.Render("esc cancels without saving")
-		v.SetContent(lipgloss.NewStyle().Padding(1, 2).MaxWidth(m.width).Render(head + "\n\n" + m.edit.form.View()))
+		sc := m.targetScope(m.edit.st)
+		subtitle := "Write to " + string(sc) + " · " + tildify(store.Path(sc, m.cwd))
+		v.SetContent(m.dialog("✎ On the workbench", subtitle, m.edit.form.View(), "esc cancels without saving · enter confirms"))
+		return v
+	}
+	if m.width < 32 || m.height < 12 {
+		v.SetContent(lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(m.height).Render("˙ᵕ˙ A little more room?\nResize to at least 32 × 12.\nq quits"))
 		return v
 	}
 
 	bodyHeight := m.height - chromeRows
 	var body string
-	if m.mode == modeHelp {
+	if m.mode == modeConfirmUnset && m.selected() != nil {
+		st := m.selected()
+		path := tildify(store.Path(m.targetScope(st), m.cwd))
+		content := m.st.warn.Render("Remove "+st.Key+"?") + "\n\n" +
+			lipgloss.NewStyle().Width(max(1, m.dialogWidth()-4)).Render("This removes the value from "+path+". A value from another file, or Claude Code's default, may take over.")
+		v.SetContent(m.dialog("◇ Make room for a default", "One setting, one file.", content, "y / enter remove · any other key keeps it"))
+		return v
+	} else if m.mode == modeHelp {
 		body = lipgloss.Place(m.width, bodyHeight, lipgloss.Center, lipgloss.Center, m.keysOverlay())
+	} else if m.details {
+		body = m.st.paneFocus.Width(m.width).Height(bodyHeight).Render(m.doc.View())
 	} else {
 		lw := m.listWidth()
 		sidePane, listPane := m.st.pane, m.st.paneFocus
@@ -900,12 +1006,23 @@ func (m *model) View() tea.View {
 		side := sidePane.Width(m.sideWidth()).Height(bodyHeight).Render(m.sidebar(m.sideWidth()-4, bodyHeight-2))
 		mid := listPane.Width(lw).Height(bodyHeight).Render(lipgloss.JoinVertical(lipgloss.Left, m.list.View(), m.listFooter(lw-4)))
 		right := m.st.pane.Width(m.doc.Width() + 4).Height(bodyHeight).Render(m.doc.View())
-		body = lipgloss.JoinHorizontal(lipgloss.Top, side, mid, right)
+		switch {
+		case m.width < 60:
+			if m.sideFocus {
+				body = sidePane.Width(m.width).Height(bodyHeight).Render(m.sidebar(m.width-4, bodyHeight-2))
+			} else {
+				body = mid
+			}
+		case m.width < 100:
+			body = lipgloss.JoinHorizontal(lipgloss.Top, side, mid)
+		default:
+			body = lipgloss.JoinHorizontal(lipgloss.Top, side, mid, right)
+		}
 	}
 	line := lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(1)
 	v.SetContent(lipgloss.JoinVertical(lipgloss.Left,
-		line.Render(m.header()),
-		body,
+		m.header(),
+		lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(bodyHeight).Render(body),
 		line.Width(m.width).Render(m.statusLine()),
 		line.Render(m.footer()),
 	))

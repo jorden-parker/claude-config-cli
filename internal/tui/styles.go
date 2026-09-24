@@ -11,8 +11,8 @@ import (
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
 )
 
-// palette: blue marks where you are and where writes go; amber marks values
-// written in a file; everything else stays neutral so those two read first.
+// Workshop palette: orchid focus, honey saved values, mint success.
+// Semantic colors adapt to light and dark terminal backgrounds.
 type palette struct {
 	ink, dim, faint, accent, set, ok, warn, err color.Color
 }
@@ -21,12 +21,12 @@ func newPalette(isDark bool) palette {
 	ld := lipgloss.LightDark(isDark)
 	return palette{
 		ink:    lipgloss.NoColor{}, // terminal default text, readable before the background is known
-		dim:    ld(lipgloss.Color("#6A727C"), lipgloss.Color("#7A828C")),
-		faint:  ld(lipgloss.Color("#C4C9CF"), lipgloss.Color("#3A4048")),
-		accent: ld(lipgloss.Color("#0B63C5"), lipgloss.Color("#6CB6FF")),
-		set:    ld(lipgloss.Color("#9A5B00"), lipgloss.Color("#E8B55A")),
-		ok:     ld(lipgloss.Color("#1A7F4B"), lipgloss.Color("#5FD7A0")),
-		warn:   ld(lipgloss.Color("#9A5B00"), lipgloss.Color("#E8B55A")),
+		dim:    ld(lipgloss.Color("#62596E"), lipgloss.Color("#A99DB8")),
+		faint:  ld(lipgloss.Color("#D8CEE3"), lipgloss.Color("#493A58")),
+		accent: ld(lipgloss.Color("#7935B5"), lipgloss.Color("#D6A0FF")),
+		set:    ld(lipgloss.Color("#916000"), lipgloss.Color("#F2CE79")),
+		ok:     ld(lipgloss.Color("#14765E"), lipgloss.Color("#88DDC0")),
+		warn:   ld(lipgloss.Color("#916000"), lipgloss.Color("#F2CE79")),
 		err:    ld(lipgloss.Color("#B42318"), lipgloss.Color("#FF7070")),
 	}
 }
@@ -36,17 +36,20 @@ type styles struct {
 	title, subtle, key, kind, label, value, ok, warn, err lipgloss.Style
 	accent, set, faint, keyCap, chip, chipOn, tab, tabOn  lipgloss.Style
 	pane, paneFocus                                       lipgloss.Style
+	surface, selection, badge                             lipgloss.Style
 }
 
 func newStyles(isDark bool) styles {
 	p := newPalette(isDark)
+	ld := lipgloss.LightDark(isDark)
+	background := ld(lipgloss.Color("#F5EFFA"), lipgloss.Color("#2C2238"))
 	fg := func(c color.Color) lipgloss.Style { return lipgloss.NewStyle().Foreground(c) }
 	pane := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(p.faint).Padding(0, 1)
 	return styles{
 		p:         p,
-		title:     fg(p.ink).Bold(true),
+		title:     fg(p.accent).Bold(true),
 		subtle:    fg(p.dim),
-		key:       fg(p.ink).Bold(true),
+		key:       fg(p.accent).Bold(true),
 		kind:      fg(p.dim),
 		label:     fg(p.ink).Bold(true),
 		value:     fg(p.ink),
@@ -60,7 +63,10 @@ func newStyles(isDark bool) styles {
 		chip:      fg(p.dim).Padding(0, 1),
 		chipOn:    lipgloss.NewStyle().Bold(true).Foreground(p.accent).Reverse(true).Padding(0, 1),
 		tab:       fg(p.dim),
-		tabOn:     fg(p.accent).Bold(true).Underline(true),
+		tabOn:     fg(p.accent).Bold(true),
+		surface:   lipgloss.NewStyle().Background(background),
+		selection: fg(p.accent).Background(background).Bold(true),
+		badge:     fg(p.accent).Background(background).Padding(0, 1).Bold(true),
 		pane:      pane,
 		paneFocus: pane.BorderForeground(p.accent),
 	}

@@ -89,7 +89,7 @@ for e in entries:
 env=[]
 for l in open('env.md'):
     m = re.match(r'\| `([A-Z0-9_]+)`\s+\| (.*?)\s+\|', l)
-    if m: env.append(dict(name=m.group(1), purpose=clean(m.group(2))[:300]))
+    if m: env.append(dict(name=m.group(1), purpose=clean(m.group(2))))
 os.remove('entries.json')
 json.dump(dict(generatedFrom="https://code.claude.com/docs/en/settings-reference.md", generatedOn="2026-09-24", settings=out, envVars=env, hookEvents=HOOK_EVENTS, modelAliases=MODEL_ALIASES), open(os.path.join(here, '..', 'internal', 'schema', 'schema.json'),'w'), indent=1)
 from collections import Counter

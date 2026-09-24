@@ -114,7 +114,7 @@ func TestKeysOverlayOpensAndCloses(t *testing.T) {
 			t.Fatal("? did not open the keys overlay")
 		}
 		view := ansi.Strip(m.View().Content)
-		for _, text := range []string{"Move", "Change", "switch the target file", "any key close"} {
+		for _, text := range []string{"Move", "Change", "switch the target file", "esc close"} {
 			if !strings.Contains(view, text) {
 				t.Fatalf("width %d: overlay missing %q\n%s", width, text, view)
 			}

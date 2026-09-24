@@ -29,8 +29,8 @@ type editState struct {
 func newEdit(st *schema.Setting, current any, sch *schema.Schema, width, height int, isDark bool) *editState {
 	e := &editState{st: st}
 	desc := st.Desc
-	if len(desc) > 300 {
-		desc = desc[:299] + "…"
+	if runes := []rune(desc); len(runes) > 300 {
+		desc = string(runes[:299]) + "…"
 	}
 	title := fmt.Sprintf("%s  (%s)", st.Key, st.Kind)
 	var groups []*huh.Group
@@ -71,7 +71,7 @@ func newEdit(st *schema.Setting, current any, sch *schema.Schema, width, height 
 		if st.Kind == schema.KindEnumOrString {
 			in := huh.NewInput().Title(st.Key + " (custom value)").Description(st.Hint).Value(&e.text).
 				Validate(func(s string) error {
-					if strings.TrimSpace(s) == "" {
+					if !isEnv(st) && strings.TrimSpace(s) == "" {
 						return fmt.Errorf("enter a value")
 					}
 					return nil
@@ -84,8 +84,19 @@ func newEdit(st *schema.Setting, current any, sch *schema.Schema, width, height 
 
 	case schema.KindString:
 		e.text = value.Text(st, current)
+		if isEnv(st) && strings.Contains(st.Desc, "newline-separated") {
+			groups = append(groups, huh.NewGroup(huh.NewText().Title(title).
+				Description(desc+"\nAlt+Enter adds a line; Enter saves.").Lines(8).Value(&e.text)))
+			break
+		}
 		in := huh.NewInput().Title(title).Description(desc).Placeholder(st.Type).Value(&e.text).
-			Validate(func(s string) error { _, err := value.Parse(st, s); return err })
+			Validate(func(s string) error {
+				if isEnv(st) {
+					return nil
+				}
+				_, err := value.Parse(st, s)
+				return err
+			})
 		if st.Key == "model" || st.Key == "agent" {
 			in.Suggestions(sch.ModelAliases)
 		}
@@ -149,6 +160,13 @@ func newEdit(st *schema.Setting, current any, sch *schema.Schema, width, height 
 	}
 
 	km := huh.NewDefaultKeyMap()
+	if isEnv(st) {
+		// Tab previews the next option inside a form; Enter commits it.
+		km.Select.Next = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "choose"))
+		km.Select.Down = key.NewBinding(key.WithKeys("down", "tab"), key.WithHelp("↓ tab", "next option"))
+		km.Select.Prev = key.NewBinding(key.WithKeys("ctrl+p"))
+		km.Select.Up = key.NewBinding(key.WithKeys("up", "shift+tab"), key.WithHelp("↑ shift+tab", "previous option"))
+	}
 	km.Quit = key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc", "cancel"))
 	e.form = huh.NewForm(groups...).WithTheme(formTheme(isDark)).WithKeyMap(km).WithWidth(width).WithHeight(height).WithShowHelp(true)
 	return e
@@ -157,6 +175,12 @@ func newEdit(st *schema.Setting, current any, sch *schema.Schema, width, height 
 // result converts the completed form into the JSON value to store.
 func (e *editState) result() (any, error) {
 	st := e.st
+	if isEnv(st) {
+		if st.Kind == schema.KindEnumOrString && e.choice != customChoice {
+			return e.choice, nil
+		}
+		return e.text, nil // Preserve quotes, whitespace and comma-separated strings.
+	}
 	switch st.Kind {
 	case schema.KindBool, schema.KindEnum:
 		return value.Parse(st, e.choice)

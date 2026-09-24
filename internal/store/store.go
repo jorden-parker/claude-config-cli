@@ -134,7 +134,12 @@ func OpenAll(cwd string) (map[Scope]*File, map[Scope]error) {
 	return files, errs
 }
 
-func split(path string) []string { return strings.Split(path, ".") }
+func split(path string) []string {
+	if strings.HasPrefix(path, "env.") {
+		return []string{"env", strings.TrimPrefix(path, "env.")}
+	}
+	return strings.Split(path, ".")
+}
 
 // Get returns the value at a dotted path.
 func (f *File) Get(path string) (any, bool) {
