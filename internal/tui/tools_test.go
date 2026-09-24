@@ -17,7 +17,7 @@ func TestToolTogglePersistsAndPreservesRules(t *testing.T) {
 	f.Set("permissions.deny", []any{"Bash(rm *)", "NotebookEdit(secret.ipynb)"})
 	f.Set("permissions.allow", []any{"Read"})
 	f.Set("model", "sonnet")
-	selectKey(t, m, "tools.NotebookEdit")
+	selectKey(t, m, "NotebookEdit")
 	for _, disabled := range []bool{true, false} {
 		pressTab(m)
 		if m.statusErr {
@@ -54,7 +54,7 @@ func TestToolToggleUsesTargetAndShowsInheritedDeny(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	m := newModel(t.TempDir())
 	m.files[store.ScopeManaged].Set("permissions.deny", []string{"NotebookEdit"})
-	selectKey(t, m, "tools.NotebookEdit")
+	selectKey(t, m, "NotebookEdit")
 	m.Update(tea.KeyPressMsg{Code: 's'})
 	pressTab(m)
 	if _, ok := m.files[store.ScopeUser].Get("permissions.deny"); ok {
@@ -89,7 +89,7 @@ func TestToolToggleRejectsInvalidRulesAndSaveFailures(t *testing.T) {
 				f.Path = t.TempDir()
 			}
 			before := store.Format(f.Data)
-			selectKey(t, m, "tools.NotebookEdit")
+			selectKey(t, m, "NotebookEdit")
 			pressTab(m)
 			if !m.statusErr {
 				t.Fatal("expected error")

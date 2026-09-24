@@ -9,20 +9,20 @@ import (
 	"github.com/jorden-parker/claude-config-cli/internal/store"
 )
 
-// Virtual rows: these are backed by permissions.deny, never tools.* keys.
+// Virtual rows: these are backed by permissions.deny, never standalone settings keys.
 // Catalogue: https://code.claude.com/docs/en/tools-reference
 var toolSettings = func() []schema.Setting {
 	names := strings.Fields(`Agent Artifact AskUserQuestion Bash CronCreate CronDelete CronList Edit EndConversation EnterPlanMode EnterWorktree ExitPlanMode ExitWorktree Glob Grep ListAgents ListMcpResourcesTool LSP Monitor NotebookEdit PowerShell PushNotification Read ReadMcpResourceTool RemoteTrigger ReportFindings ScheduleWakeup SendFeedback SendMessage SendUserFile ShareOnboardingGuide Skill SubagentHandback TaskCreate TaskGet TaskList TaskOutput TaskStop TaskUpdate TodoWrite ToolSearch WaitForMcpServers WebFetch WebSearch Workflow Write`)
 	out := make([]schema.Setting, len(names))
 	for i, name := range names {
-		out[i] = schema.Setting{Key: "tools." + name, Section: "Tools", Kind: schema.KindBool, ScopeClass: schema.ScopeAny}
+		out[i] = schema.Setting{Key: name, Section: "Tools", Kind: schema.KindBool, ScopeClass: schema.ScopeAny}
 	}
 	return out
 }()
 
 func toolName(st *schema.Setting) string {
 	if st != nil && st.Section == "Tools" {
-		return strings.TrimPrefix(st.Key, "tools.")
+		return st.Key
 	}
 	return ""
 }

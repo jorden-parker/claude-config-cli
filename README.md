@@ -58,7 +58,8 @@ Global-config keys (`~/.claude.json`) always write there, whatever the target.
 Managed settings are shown read-only.
 
 The **Tools** section lists Claude Code tools such as `NotebookEdit`, `Bash`,
-and `Read`. Filter with `/NotebookEdit`, then press `tab` (or `enter`) to toggle
+and `Read`, displayed by name without a `tools.` prefix. Jump between sections
+with `[` / `]`, or filter `/Tools` to show only tools. Filter with `/NotebookEdit`, then press `tab` (or `enter`) to toggle
 that tool in the selected target file. Disabling adds its bare name to
 `permissions.deny`; enabling removes that exact entry. Normal permission prompts,
 scoped rules, and denies in other files still apply. The details pane shows which
