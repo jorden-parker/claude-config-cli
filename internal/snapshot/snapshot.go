@@ -135,7 +135,7 @@ func Restore(filename, project string, force bool) (int, error) {
 		if !validObject(data) {
 			return 0, fmt.Errorf("snapshot file %s: expected a JSON object", key)
 		}
-		path, err = filepath.Abs(path)
+		path, err = physical(path)
 		if err != nil {
 			return 0, err
 		}
@@ -194,4 +194,33 @@ func writeFile(path string, data []byte, force bool) error {
 		return err
 	}
 	return os.Rename(f.Name(), path)
+}
+
+// physical resolves symlinks in the longest existing ancestor of path and
+// rejoins the missing tail, so two aliases of one file compare equal even
+// before the file exists.
+func physical(path string) (string, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	existing, tail := path, ""
+	for {
+		if _, err := os.Lstat(existing); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			break // reached the root without finding anything
+		}
+		tail = filepath.Join(filepath.Base(existing), tail)
+		existing = parent
+	}
+	resolved, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(resolved, tail), nil
 }

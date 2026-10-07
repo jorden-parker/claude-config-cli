@@ -214,6 +214,8 @@ ccfg statusline fields          # every status line field and the data it reads
 ccfg statusline preview         # render it for the docs' example session
 ccfg statusline on --fields model,branch,ctx_used --existing end
 ccfg statusline off             # put the previous status line back
+ccfg snapshot ~/claude-settings.json   # save every settings file outside .claude
+ccfg restore ~/claude-settings.json    # put them back (--force to replace existing)
 ```
 
 Scopes: `user` (default), `project`, `local`, `global`.

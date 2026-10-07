@@ -176,3 +176,44 @@ func TestHomeAsProject(t *testing.T) {
 		t.Fatalf("restore = %d, %v", n, err)
 	}
 }
+
+func TestSymlinkedProjectAliasesUserScope(t *testing.T) {
+	_, archive := setup(t)
+	home := os.Getenv("HOME")
+	link := filepath.Join(t.TempDir(), "project-link")
+	if err := os.Symlink(home, link); err != nil {
+		t.Fatal(err)
+	}
+	// Save with the alias: user and project keys hold identical bytes.
+	put(t, paths(home)["user"], []byte(`{"model":"saved"}`))
+	if _, err := Save(archive, link); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(paths(home)["user"])
+	os.Remove(filepath.Join(home, ".claude"))
+	// Non-forced restore must succeed once, not fail on the second alias.
+	if n, err := Restore(archive, "", false); err != nil || n != 1 {
+		t.Fatalf("restore = %d, %v", n, err)
+	}
+}
+
+func TestConflictingAliasContentsAreRejected(t *testing.T) {
+	_, archive := setup(t)
+	home := os.Getenv("HOME")
+	link := filepath.Join(t.TempDir(), "project-link")
+	if err := os.Symlink(home, link); err != nil {
+		t.Fatal(err)
+	}
+	a := Archive{Version: 1, Project: link, Files: map[string][]byte{
+		"user":    []byte(`{"model":"a"}`),
+		"project": []byte(`{"model":"b"}`),
+	}}
+	data, _ := json.Marshal(a)
+	put(t, archive, data)
+	if _, err := Restore(archive, "", true); err == nil || !strings.Contains(err.Error(), "conflicting") {
+		t.Fatalf("got %v", err)
+	}
+	if _, err := os.Stat(paths(home)["user"]); !os.IsNotExist(err) {
+		t.Fatal("wrote before rejecting the conflict")
+	}
+}
