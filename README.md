@@ -224,11 +224,33 @@ rtk init -g --auto-patch        # hook + ~/.claude/RTK.md, backs up settings.jso
 rtk init --show                 # confirm the hook is listed
 ```
 
-The hook rewrites `Bash` commands only. Claude Code's built-in `Read`, `Grep`,
-and `Glob` tools do not pass through it. To push searches into the shell, where
-the hook applies, turn `Grep` and `Glob` off in the **Tools** pane; this adds
-them to `permissions.deny` in the chosen file. Leave `Read` on: `Edit` needs a
-prior `Read` of the file and fails without it.
+The hook rewrites `Bash` commands only. On macOS and Linux, Claude Code
+already leaves `Grep` and `Glob` out of the default tool set and searches with
+`find` and `grep` through `Bash`, so those searches reach the hook with no
+extra setup ([tools reference](https://code.claude.com/docs/en/tools-reference)).
+The built-in `Read` tool is the gap. To send reads through rtk too, add a
+`PreToolUse` hook that refuses `Read` and names the replacement:
+
+```json
+{
+  "matcher": "Read",
+  "hooks": [{ "type": "command", "command": "~/.claude/hooks/read-via-rtk.sh" }]
+}
+```
+
+```sh
+#!/bin/sh
+# ~/.claude/hooks/read-via-rtk.sh
+f=$(jq -r '.tool_input.file_path' )
+printf '%s' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Read is off. Run `rtk read '"$f"'` in Bash, or `sed -n '"'"'1,200p'"'"' '"$f"'` just before an Edit."}}'
+```
+
+Edits keep working: Claude Code accepts a plain `cat`, `head`, `tail`,
+`sed -n 'X,Yp'`, or `grep` on a single file as the read that must come before
+an `Edit`. rtk leaves `sed` alone but rewrites `cat`, `head`, and `tail` to
+`rtk read`, which does not count, so the hook's message points at `sed -n`.
+Refusing `Read` also turns off the newer models' shortcut of editing a file
+without reading it first.
 
 Check it works after a session with `rtk gain`. Commands that must stay raw
 go in `exclude_commands` under `[hooks]` in rtk's `config.toml`
