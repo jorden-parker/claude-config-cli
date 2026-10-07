@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
+	"github.com/jorden-parker/claude-config-cli/internal/statusline"
 	"github.com/jorden-parker/claude-config-cli/internal/store"
 	"github.com/jorden-parker/claude-config-cli/internal/tui"
 	"github.com/jorden-parker/claude-config-cli/internal/value"
@@ -64,7 +65,8 @@ Pull up a terminal. Let's tinker.`,
 	}
 	root.PersistentFlags().StringVarP(&flagDir, "dir", "C", "", "project directory (default: current directory)")
 
-	root.AddCommand(listCmd(), getCmd(), setCmd(), unsetCmd(), docCmd(), showCmd(), envCmd(), pathsCmd())
+	statusline.Program = name
+	root.AddCommand(listCmd(), getCmd(), setCmd(), unsetCmd(), docCmd(), showCmd(), envCmd(), pathsCmd(), statuslineCmd())
 	return root
 }
 

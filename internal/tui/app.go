@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
+	"github.com/jorden-parker/claude-config-cli/internal/statusline"
 	"github.com/jorden-parker/claude-config-cli/internal/store"
 	"github.com/jorden-parker/claude-config-cli/internal/value"
 )
@@ -108,6 +109,7 @@ type model struct {
 	searching bool     // Settings list holds every key while a filter is active
 	parentSet map[string]bool
 	synthetic map[string]*schema.Setting
+	sl        statusState
 }
 
 // Run starts the interactive editor.
@@ -122,7 +124,7 @@ func newModel(cwd string) *model {
 	m.st = newStyles(true)
 	m.reload()
 	m.sections = append([]string(nil), m.sch.Sections()...)
-	m.sections = append(m.sections, envSection)
+	m.sections = append(m.sections, envSection, statusSection)
 	if !contains(m.sections, toolsSection) {
 		m.sections = append(m.sections, toolsSection)
 	}
@@ -182,6 +184,8 @@ func (m *model) paneTitle() string {
 
 func (m *model) reload() {
 	m.files, m.errs = store.OpenAll(m.cwd)
+	m.sl.cfg = nil
+	m.statusSync()
 }
 
 // items rebuilds the Settings rows so each shows the live value.
@@ -237,7 +241,7 @@ func (m *model) targetScope(st *schema.Setting) store.Scope {
 	return m.scope
 }
 
-func (m *model) Init() tea.Cmd { return tea.RequestBackgroundColor }
+func (m *model) Init() tea.Cmd { return tea.Batch(tea.RequestBackgroundColor, m.statusPreview(false)) }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -246,6 +250,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list = updated
 		m.refreshDoc()
 		return m, paneCommand(cmd)
+	case statusPreviewMsg:
+		m.statusPreviewDone(msg)
+		return m, nil
 	case tea.BackgroundColorMsg:
 		m.isDark = msg.IsDark()
 		m.st = newStyles(m.isDark)
@@ -338,6 +345,11 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSidebar(k)
 	}
 	if isKey && !m.list.SettingFilter() {
+		if cmd, ok := m.statusKey(k); ok {
+			return m, cmd
+		}
+	}
+	if isKey && !m.list.SettingFilter() {
 		switch {
 		case key.Matches(k, keys.back) && m.details:
 			m.details = false
@@ -373,6 +385,10 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setStatus("Tools are turned on and off with tab. Nothing to remove.", false)
 				return m, nil
 			}
+			if isStatus(st) {
+				m.setStatus("Status line rows change with tab. Nothing to remove.", false)
+				return m, nil
+			}
 			if st == nil {
 				return m, nil
 			}
@@ -391,6 +407,9 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if toolName(st) != "" {
 					url = "https://code.claude.com/docs/en/tools-reference"
+				}
+				if isStatus(st) {
+					url = statusline.DocURL
 				}
 				openURL(url)
 				m.setStatus("Opened docs in your browser: "+url, false)
@@ -512,6 +531,9 @@ func (m *model) startEdit() tea.Cmd {
 	if toolName(st) != "" {
 		return m.toggleTool(st)
 	}
+	if isStatus(st) {
+		return m.statusAct(st)
+	}
 	sc := m.targetScope(st)
 	if !store.Allowed(st, sc) {
 		m.setStatus(notReadHere(st, sc), true)
@@ -533,6 +555,9 @@ func (m *model) cycleValue() tea.Cmd {
 	}
 	if toolName(st) != "" {
 		return m.toggleTool(st)
+	}
+	if isStatus(st) {
+		return m.statusAct(st)
 	}
 	var opts []string
 	switch st.Kind {
@@ -603,12 +628,13 @@ func (m *model) doUnset() tea.Cmd {
 }
 
 func (m *model) afterWrite() tea.Cmd {
+	m.statusSync()
 	idx := m.list.Index()
 	m.list.Title = m.paneTitle()
 	cmd := m.list.SetItems(m.items())
 	m.list.Select(idx)
 	m.refreshDoc()
-	return paneCommand(cmd)
+	return tea.Batch(paneCommand(cmd), m.statusPreview(false))
 }
 
 func (m *model) cycleScope() {
@@ -673,6 +699,11 @@ func (m *model) refreshDoc() {
 	}
 	if isEnv(st) {
 		m.doc.SetContent(m.envDoc(st, w))
+		m.doc.GotoTop()
+		return
+	}
+	if isStatus(st) {
+		m.doc.SetContent(m.statusDoc(st, w))
 		m.doc.GotoTop()
 		return
 	}
@@ -789,7 +820,9 @@ func (m *model) hints() []hint {
 	if len(m.path) > 0 {
 		back = hint{"esc", "back"}
 	}
-	if toolName(st) != "" {
+	if isStatus(st) {
+		h = append(h, hint{"tab", "change"}, hint{"J K", "reorder"}, hint{"p", "run preview"}, back, hint{"s", "target file"}, hint{"/", "search all"}, hint{"[ ]", "section"})
+	} else if toolName(st) != "" {
 		h = append(h, hint{"tab", "turn on/off"}, back, hint{"s", "target file"}, hint{"/", "search all"}, hint{"[ ]", "section"})
 	} else if m.onGroup() {
 		h = append(h, hint{"enter", "open"}, back, hint{"s", "target file"}, hint{"/", "search all"}, hint{"[ ]", "section"})
@@ -922,6 +955,10 @@ func (m *model) listFooter(width int) string {
 		left = "off = listed in permissions.deny"
 	case m.section() == envSection:
 		left = "✿ strings, with roots"
+	case isStatus(m.selected()) && statusline.On(m.files[m.scope]):
+		left = "● in use"
+	case isStatus(m.selected()):
+		left = "○ not in use yet"
 	case len(m.path) > 0:
 		left = "esc back"
 	}
@@ -936,7 +973,7 @@ func (m *model) keysOverlay() string {
 		rows  []hint
 	}{
 		{"Move", []hint{{"↑ ↓  j k", "move up and down"}, {"[ ]", "previous or next section"}, {"← →", "move between sections and their keys"}, {"enter", "open a group such as permissions"}, {"esc ←", "go back out of a group"}, {"/", "search every key in every section"}, {"pgup pgdn", "scroll the details"}}},
-		{"Change", []hint{{"enter", "edit the setting, or turn a tool on or off"}, {"tab", "next value, or turn the tool on or off"}, {"u", "remove the key from the target file"}, {"s / S", "switch the target file / open file picker"}}},
+		{"Change", []hint{{"enter", "edit the setting, or turn a tool on or off"}, {"tab", "next value, or turn the tool on or off"}, {"u", "remove the key from the target file"}, {"s / S", "switch the target file / open file picker"}, {"J K", "status line: move a field later or earlier"}, {"p", "status line: run the existing command for the preview"}}},
 		{"Other", []hint{{"ctrl+k", "jump to a section or discover a setting"}, {"ctrl+d", "expand details / return to settings"}, {"o", "open the docs page in your browser"}, {"r", "reload the settings files from disk"}, {"q", "quit"}}},
 	}
 	var b strings.Builder

@@ -69,6 +69,8 @@ ccfg -C ~/repo                  # another project
 | `[` `]`       | open the previous or next section                                   |
 | `pgup` `pgdn` | scroll the details pane                                             |
 | `o`           | open the docs page for the key                                      |
+| `J` `K`       | status line: move a shown field later or earlier                    |
+| `p`           | status line: run the existing command for the preview               |
 | `r`           | reload the settings files                                           |
 | `?`           | show every key                                                      |
 | `q`           | quit                                                                |
@@ -136,6 +138,36 @@ These fit the existing Bubble Tea event loop without introducing a second form
 framework. The garden motif adds a small floral accent while retaining the app's
 blue focus, amber saved values, and light/dark palettes.
 
+### Status line
+
+Open **Status line** in the section list to build a status line from the fields
+in the [status line reference](https://code.claude.com/docs/en/statusline):
+model, directory, git branch, context use, cost, rate limits, and more. The
+details pane previews the result for the example session in the docs.
+
+A status line you already have is kept. Claude Code runs one `statusLine`
+command, so `ccfg` points that key at its own renderer and the renderer runs
+your existing command with the same input. Its output, such as a plugin's badge,
+appears beside the fields you pick, in the preview and in Claude Code.
+
+- **Tab or Enter** turns a field on or off, and cycles the other rows.
+  **J / K** (or Shift+↓ / Shift+↑) reorder the shown fields.
+- **Use this status line** makes it live in the target file. Until then your
+  picks are saved but `statusLine` is untouched. Turning it off puts the
+  original `statusLine` value back. `padding`, `refreshInterval`, and
+  `hideVimModeIndicator` are kept as they were.
+- **Existing status line** places the kept output at the start or end of the
+  line, on its own row above or below, or hides it.
+- A command from the project or local file is not run for the preview until you
+  press **p**, because a repository can supply those files.
+
+Your picks live next to the settings file: `~/.claude/ccfg-statusline.json` for
+user settings, `.claude/ccfg-statusline.json` for project settings, and
+`.claude/ccfg-statusline.local.json` for local settings. Project settings call
+`ccfg` by name, so teammates need it on their PATH. If the existing command
+fails, times out after 3 seconds, or prints nothing, it is left out and the
+rest still renders.
+
 Editors per value kind:
 
 - **bool, enum**: a picker with each option's meaning from the docs
@@ -163,6 +195,10 @@ ccfg rm theme -s project        # alias of unset
 ccfg show -s user
 ccfg paths
 ccfg env CLAUDE_CODE_           # documented environment variables
+ccfg statusline fields          # every status line field and the data it reads
+ccfg statusline preview         # render it for the docs' example session
+ccfg statusline on --fields model,branch,ctx_used --existing end
+ccfg statusline off             # put the previous status line back
 ```
 
 Scopes: `user` (default), `project`, `local`, `global`.

@@ -83,6 +83,9 @@ func (m *model) levelItems() []list.Item {
 	if m.section() == envSection {
 		return m.envItems()
 	}
+	if m.section() == statusSection {
+		return m.statusItems()
+	}
 	prefix := m.levelPrefix()
 	parents := m.parents()
 	seen := map[string]bool{}
@@ -144,6 +147,11 @@ func (m *model) searchItems() []list.Item {
 		out = append(out, row)
 	}
 	out = append(out, m.envItems()...)
+	for _, li := range m.statusItems() {
+		if !li.(item).header {
+			out = append(out, li)
+		}
+	}
 	return append(out, m.toolItems()...)
 }
 
@@ -218,6 +226,9 @@ func (m *model) reveal(key string) {
 	section := toolsSection
 	if strings.HasPrefix(key, "env.") {
 		section = envSection
+	}
+	if strings.HasPrefix(key, "statusline.") {
+		section = statusSection
 	}
 	if st := m.sch.Get(key); st != nil {
 		section = st.Section
@@ -363,6 +374,9 @@ func (m *model) sectionCount(section string) int {
 			}
 		}
 		return n
+	}
+	if section == statusSection {
+		return len(m.sl.cfg.Fields)
 	}
 	for i := range m.sch.Settings {
 		st := &m.sch.Settings[i]
