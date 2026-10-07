@@ -262,10 +262,10 @@ is kept when you turn `ccfg`'s fields on.
 
 ## Development
 
-Install the Git hooks after cloning (requires Node.js, npm, and Go):
+Install the Git hooks after cloning (requires Bun and Go):
 
 ```sh
-npm ci
+bun install
 ```
 
 Commits format staged files with Prettier and Go files with `gofmt`, then run
