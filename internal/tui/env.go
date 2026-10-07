@@ -61,6 +61,10 @@ func (m *model) envItems() []list.Item {
 	for _, e := range m.sch.EnvVars {
 		entries[e.Name] = e.Purpose
 	}
+	gone := map[string]string{}
+	for _, e := range m.sch.RemovedEnvVars {
+		gone[e.Name] = e.Purpose
+	}
 	for _, f := range m.files {
 		if f == nil {
 			continue
@@ -68,7 +72,12 @@ func (m *model) envItems() []list.Item {
 		if v, ok := f.Get("env"); ok {
 			if vars, ok := v.(map[string]any); ok {
 				for name := range vars {
-					if _, known := entries[name]; !known {
+					if _, known := entries[name]; known {
+						continue
+					}
+					if note, ok := gone[name]; ok {
+						entries[name] = note
+					} else {
 						entries[name] = "Custom environment variable from your settings. Enter edits its string value."
 					}
 				}

@@ -57,6 +57,7 @@ type Setting struct {
 	OptionHelp  map[string]string `json:"optionHelp"`
 	Example     string            `json:"example"`
 	Deprecated  string            `json:"deprecated"`
+	Removed     bool              `json:"removed"`
 	Hint        string            `json:"hint"`
 	Suggestions []string          `json:"suggestions"`
 	Global      bool              `json:"global"`
@@ -74,9 +75,14 @@ type Schema struct {
 	GeneratedOn   string    `json:"generatedOn"`
 	Settings      []Setting `json:"settings"`
 	EnvVars       []EnvVar  `json:"envVars"`
-	HookEvents    []string  `json:"hookEvents"`
-	ModelAliases  []string  `json:"modelAliases"`
+	// RemovedEnvVars are variables current versions ignore; nothing lists them.
+	RemovedEnvVars []EnvVar `json:"removedEnvVars"`
+	HookEvents     []string `json:"hookEvents"`
+	ModelAliases   []string `json:"modelAliases"`
 
+	// removed holds keys current Claude Code versions ignore. Get still finds
+	// them so an old settings file can be cleaned up; nothing lists them.
+	removed  []Setting
 	byKey    map[string]*Setting
 	sections []string
 }
@@ -93,7 +99,19 @@ func Load() *Schema {
 		if err := json.Unmarshal(raw, s); err != nil {
 			panic("schema: embedded schema.json is invalid: " + err.Error())
 		}
-		s.byKey = make(map[string]*Setting, len(s.Settings))
+		all := s.Settings
+		s.Settings = make([]Setting, 0, len(all))
+		for _, st := range all {
+			if st.Removed {
+				s.removed = append(s.removed, st)
+			} else {
+				s.Settings = append(s.Settings, st)
+			}
+		}
+		s.byKey = make(map[string]*Setting, len(all))
+		for i := range s.removed {
+			s.byKey[s.removed[i].Key] = &s.removed[i]
+		}
 		seen := map[string]bool{}
 		for i := range s.Settings {
 			st := &s.Settings[i]
@@ -138,11 +156,11 @@ func (s *Schema) Search(q string) []*Setting {
 	return out
 }
 
-// Keys returns every key, sorted.
+// Keys returns every current key, sorted.
 func (s *Schema) Keys() []string {
-	out := make([]string, 0, len(s.byKey))
-	for k := range s.byKey {
-		out = append(out, k)
+	out := make([]string, 0, len(s.Settings))
+	for i := range s.Settings {
+		out = append(out, s.Settings[i].Key)
 	}
 	sort.Strings(out)
 	return out

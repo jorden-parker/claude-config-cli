@@ -107,7 +107,7 @@ func listCmd() *cobra.Command {
 	}
 	c.Flags().StringVarP(&section, "section", "s", "", "only this section (substring match)")
 	c.Flags().StringVarP(&search, "search", "q", "", "filter by key or description text")
-	c.Flags().BoolVar(&showAll, "all", false, "include removed or deprecated keys")
+	c.Flags().BoolVar(&showAll, "all", false, "include deprecated keys")
 	c.AddCommand(&cobra.Command{
 		Use:   "sections",
 		Short: "List the section names",

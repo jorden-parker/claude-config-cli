@@ -1,4 +1,4 @@
-import re, json, os, subprocess, sys
+import re, json, os, subprocess, sys, datetime
 here = os.path.dirname(os.path.abspath(__file__))
 os.chdir(here)
 subprocess.run([sys.executable, 'extract.py'], check=True, stdout=subprocess.DEVNULL)
@@ -12,6 +12,10 @@ def deprecated(key):
     if w and re.search(r'[Rr]emoved|[Dd]eprecated|no effect', w.group(1)):
         return re.sub(r'\s+',' ', re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', w.group(1))).strip()
     return ''
+
+# Removed keys do nothing on current versions; deprecated ones are still read.
+def removed(note):
+    return bool(re.search(r'Removed in v|has no effect', note))
 
 def clean(s):
     s = re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', s)
@@ -72,6 +76,7 @@ for e in entries:
                 example=e['example'], deprecated=deprecated(e['key']), hint='', suggestions=[])
     if children and kind=='json': item['kind']='group'
     item.update(overrides.get(e['key'], {}))
+    item['removed'] = removed(item['deprecated'])
     item['global'] = e['section']=='Global config settings'
     sc = clean(e['scope'])
     head = sc.split('.')[0].strip()
@@ -86,13 +91,31 @@ for e in entries:
     out.append(item)
 
 # env vars
-env=[]
-for l in open('env.md'):
+# Only the "## Variables" table lists variables Claude Code reads; later tables
+# on the page are examples. Rows the docs mark as removed are left out.
+env=[]; dropped=[]
+variables = re.search(r'\n## Variables\n(.*?)(?=\n## )', open('env.md').read(), re.S).group(1)
+for l in variables.split('\n'):
     m = re.match(r'\| `([A-Z0-9_]+)`\s+\| (.*?)\s+\|', l)
-    if m: env.append(dict(name=m.group(1), purpose=clean(m.group(2))))
+    if not m: continue
+    purpose = clean(m.group(2))
+    if removed(purpose.split('. ')[0]): dropped.append(dict(name=m.group(1), purpose=purpose))
+    else: env.append(dict(name=m.group(1), purpose=purpose))
 os.remove('entries.json')
-json.dump(dict(generatedFrom="https://code.claude.com/docs/en/settings-reference.md", generatedOn="2026-09-24", settings=out, envVars=env, hookEvents=HOOK_EVENTS, modelAliases=MODEL_ALIASES), open(os.path.join(here, '..', 'internal', 'schema', 'schema.json'),'w'), indent=1)
+json.dump(dict(generatedFrom="https://code.claude.com/docs/en/settings-reference.md", generatedOn=datetime.date.today().isoformat(), settings=out, envVars=env, removedEnvVars=dropped, hookEvents=HOOK_EVENTS, modelAliases=MODEL_ALIASES), open(os.path.join(here, '..', 'internal', 'schema', 'schema.json'),'w'), indent=1)
 from collections import Counter
 print(len(out), Counter(i['kind'] for i in out), len(env))
-print([i['key'] for i in out if i['deprecated']])
+print('deprecated', [i['key'] for i in out if i['deprecated'] and not i['removed']])
+print('removed', [i['key'] for i in out if i['removed']])
+print('removed env', [e['name'] for e in dropped])
+
+# The Tools pane is hand-written; report drift from the tools reference.
+# NOT_DENIABLE are documented tools that Claude Code rejects in permissions.deny.
+NOT_DENIABLE = {'SubagentHandback', 'TaskOutput'}
+table = re.search(r'\n\| Tool \| Description.*?\n(.*?)\n\n', open('tools.md').read(), re.S).group(1)
+documented = set(re.findall(r'^\| `(\w+)`', table, re.M)) - NOT_DENIABLE
+listed = set(re.findall(r'^\t\t\{"(\w+)", "', open(os.path.join(here, '..', 'internal', 'tui', 'tools.go')).read(), re.M))
+if documented != listed:
+    print('tools.go is out of date: add', sorted(documented - listed), 'remove', sorted(listed - documented))
+    sys.exit(1)
 print([i['key'] for i in out if i['kind']=='group'])

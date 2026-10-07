@@ -12,6 +12,8 @@ import (
 
 // Virtual rows: these are backed by permissions.deny, never standalone settings keys.
 // Catalogue: https://code.claude.com/docs/en/tools-reference
+// Left out because Claude Code rejects them in permissions.deny: SubagentHandback
+// (only given to subagents) and TaskOutput (removed in v2.1.277).
 var toolSettings = func() []schema.Setting {
 	entries := []struct{ name, desc string }{
 		{"Agent", "Delegate work to subagents."},
@@ -46,11 +48,9 @@ var toolSettings = func() []schema.Setting {
 		{"SendUserFile", "Deliver files to your device."},
 		{"ShareOnboardingGuide", "Upload and share ONBOARDING.md."},
 		{"Skill", "Run a skill's instructions."},
-		{"SubagentHandback", "Return a subagent's final report."},
 		{"TaskCreate", "Add a tracked task."},
 		{"TaskGet", "Inspect one tracked task."},
 		{"TaskList", "Show tracked tasks and status."},
-		{"TaskOutput", "Read background-task output (deprecated)."},
 		{"TaskStop", "Halt a background task."},
 		{"TaskUpdate", "Modify or delete tracked tasks."},
 		{"TodoWrite", "Maintain the legacy task checklist."},

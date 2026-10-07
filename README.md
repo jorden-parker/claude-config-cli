@@ -108,7 +108,7 @@ Reload and save messages appear above the keyboard-help footer, which stays visi
 ### Environment variables
 
 Open **Environment** in the section list, or press `/` and search a variable
-name. The ✿ **Variable garden** lists all 368 variables in the bundled Claude
+name. The ✿ **Variable garden** lists all 377 variables in the bundled Claude
 Code reference, plus custom names already present in your settings. The details
 pane shows the full description, suggested choices, and settings-file precedence.
 
@@ -187,9 +187,14 @@ Commits format staged files with Prettier and Go files with `gofmt`, then run
 `internal/schema/schema.json` is generated from the docs. To refresh it:
 
 ```sh
-tools/fetch.sh   # downloads settings-reference.md and env-vars.md, then runs gen.py
+tools/fetch.sh   # downloads the settings, env-vars and tools references, then runs gen.py
 go test ./...
+tools/check-tools.sh   # optional: asks your installed Claude Code to validate every tool name
 ```
+
+Settings and variables the docs mark as removed are left out of every list.
+`ccfg get KEY` and `ccfg rm KEY` still work on them, so you can clean up an old
+file. `gen.py` fails if the Tools pane no longer matches the tools reference.
 
 `tools/gen.py` holds the small hand-curated overrides (model aliases, built-in
 output style names, hook event names) that the reference page describes in

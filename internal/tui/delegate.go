@@ -51,7 +51,7 @@ func (d rowDelegate) Render(w io.Writer, lm list.Model, index int, li list.Item)
 	case it.group:
 		right = s.subtle.Render("›")
 	case it.st.Deprecated != "":
-		right = s.subtle.Render("removed")
+		right = s.subtle.Render("deprecated")
 	case it.off:
 		right = s.err.Render("○ off") + " " + s.subtle.Render(it.scope)
 	case it.tool:

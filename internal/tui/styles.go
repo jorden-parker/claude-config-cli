@@ -123,7 +123,7 @@ func docDescription(s styles, st *schema.Setting, width int) string {
 	wrap := lipgloss.NewStyle().Width(width)
 	var b strings.Builder
 	if st.Deprecated != "" {
-		b.WriteString(s.warn.Render(wrap.Render("Removed: "+st.Deprecated)) + "\n\n")
+		b.WriteString(s.warn.Render(wrap.Render(st.Deprecated)) + "\n\n")
 	}
 	b.WriteString(s.label.Render("What it does") + "\n" + wrap.Render(st.Desc) + "\n\n")
 	return b.String()
