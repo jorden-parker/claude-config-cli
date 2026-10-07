@@ -3,12 +3,15 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
@@ -98,6 +101,9 @@ type File struct {
 	Path   string
 	Exists bool
 	Data   map[string]any
+	// order is the key order of each object as it was read, by path, so that
+	// saving leaves the file's keys where they were.
+	order map[string][]string
 }
 
 // Open loads a scope's file. A missing file yields an empty document.
@@ -117,7 +123,110 @@ func Open(scope Scope, cwd string) (*File, error) {
 	if err := json.Unmarshal(b, &f.Data); err != nil {
 		return f, fmt.Errorf("%s: %w", f.Path, err)
 	}
+	f.order = map[string][]string{}
+	_ = scanOrder(json.NewDecoder(bytes.NewReader(b)), "", f.order)
 	return f, nil
+}
+
+// scanOrder records the key order of every object in a JSON document.
+func scanOrder(dec *json.Decoder, path string, order map[string][]string) error {
+	t, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	switch t {
+	case json.Delim('{'):
+		for dec.More() {
+			k, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			key, _ := k.(string)
+			order[path] = append(order[path], key)
+			if err := scanOrder(dec, child(path, key), order); err != nil {
+				return err
+			}
+		}
+		_, err = dec.Token()
+	case json.Delim('['):
+		for i := 0; dec.More(); i++ {
+			if err := scanOrder(dec, child(path, strconv.Itoa(i)), order); err != nil {
+				return err
+			}
+		}
+		_, err = dec.Token()
+	}
+	return err
+}
+
+func child(path, key string) string { return path + "\x00" + key }
+
+// encode writes v the way json.MarshalIndent does, except that an object's
+// keys keep the order they were read in. Keys added since go last, sorted.
+func encode(b *bytes.Buffer, v any, path, indent string, order map[string][]string) error {
+	switch x := v.(type) {
+	case map[string]any:
+		if len(x) == 0 {
+			b.WriteString("{}")
+			return nil
+		}
+		var keys, added []string
+		seen := map[string]bool{}
+		for _, k := range order[path] {
+			if _, ok := x[k]; ok && !seen[k] {
+				keys, seen[k] = append(keys, k), true
+			}
+		}
+		for k := range x {
+			if !seen[k] {
+				added = append(added, k)
+			}
+		}
+		sort.Strings(added)
+		keys = append(keys, added...)
+		b.WriteString("{\n")
+		for i, k := range keys {
+			name, err := json.Marshal(k)
+			if err != nil {
+				return err
+			}
+			b.WriteString(indent + "  ")
+			b.Write(name)
+			b.WriteString(": ")
+			if err := encode(b, x[k], child(path, k), indent+"  ", order); err != nil {
+				return err
+			}
+			if i < len(keys)-1 {
+				b.WriteByte(',')
+			}
+			b.WriteByte('\n')
+		}
+		b.WriteString(indent + "}")
+	case []any:
+		if len(x) == 0 {
+			b.WriteString("[]")
+			return nil
+		}
+		b.WriteString("[\n")
+		for i, item := range x {
+			b.WriteString(indent + "  ")
+			if err := encode(b, item, child(path, strconv.Itoa(i)), indent+"  ", order); err != nil {
+				return err
+			}
+			if i < len(x)-1 {
+				b.WriteByte(',')
+			}
+			b.WriteByte('\n')
+		}
+		b.WriteString(indent + "]")
+	default:
+		out, err := json.MarshalIndent(v, indent, "  ")
+		if err != nil {
+			return err
+		}
+		b.Write(out)
+	}
+	return nil
 }
 
 // OpenAll loads every scope. Errors are returned per scope and don't stop the rest.
@@ -198,7 +307,8 @@ func (f *File) Unset(path string) bool {
 	return true
 }
 
-// Save writes the file with two-space indentation.
+// Save writes the file with two-space indentation, keeping the key order it
+// was read with.
 func (f *File) Save() error {
 	if f.Scope == ScopeManaged {
 		return errors.New("managed settings are read-only")
@@ -206,11 +316,11 @@ func (f *File) Save() error {
 	if err := os.MkdirAll(filepath.Dir(f.Path), 0o755); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(f.Data, "", "  ")
-	if err != nil {
+	var buf bytes.Buffer
+	if err := encode(&buf, f.Data, "", "", f.order); err != nil {
 		return err
 	}
-	b = append(b, '\n')
+	b := append(buf.Bytes(), '\n')
 	if err := os.WriteFile(f.Path, b, 0o600); err != nil {
 		return err
 	}

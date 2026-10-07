@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
@@ -62,5 +63,76 @@ func TestAllowed(t *testing.T) {
 	}
 	if Allowed(s.Get("theme"), ScopeManaged) {
 		t.Error("managed scope is read-only")
+	}
+}
+
+func TestSaveKeepsKeyOrder(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".claude", "settings.json")
+	before := `{
+  "theme": "dark",
+  "statusLine": {
+    "type": "command",
+    "command": "a <b>",
+    "padding": 1
+  },
+  "hooks": [
+    {
+      "z": [],
+      "a": {}
+    }
+  ],
+  "env": {
+    "B": "1",
+    "A": "2"
+  }
+}
+`
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(before), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Open(ScopeProject, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Untouched, the file comes back as it was, apart from JSON's own escaping.
+	if err := f.Save(); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(before, "a <b>", `a \u003cb\u003e`, 1)
+	if got, _ := os.ReadFile(path); string(got) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+	// A replaced object keeps its order; new keys go last, sorted.
+	_ = f.Set("statusLine", map[string]any{"padding": 2.0, "command": "c", "type": "command", "extra": true})
+	_ = f.Set("model", "opus")
+	_ = f.Set("apiKeyHelper", []string{"x"})
+	f.Unset("hooks")
+	if err := f.Save(); err != nil {
+		t.Fatal(err)
+	}
+	want = `{
+  "theme": "dark",
+  "statusLine": {
+    "type": "command",
+    "command": "c",
+    "padding": 2,
+    "extra": true
+  },
+  "env": {
+    "B": "1",
+    "A": "2"
+  },
+  "apiKeyHelper": [
+    "x"
+  ],
+  "model": "opus"
+}
+`
+	if got, _ := os.ReadFile(path); string(got) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
