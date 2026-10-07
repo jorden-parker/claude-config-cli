@@ -19,6 +19,8 @@ func (m *model) openPalette() tea.Cmd {
 			label = "✿ Environment — the variable garden"
 		} else if section == toolsSection {
 			label = "⚒ Tools — the toolbox"
+		} else if section == rtkSection {
+			label = "⌁ RTK — condense command output"
 		}
 		options = append(options, huh.NewOption(label, i))
 	}

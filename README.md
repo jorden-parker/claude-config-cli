@@ -75,8 +75,8 @@ ccfg -C ~/repo                  # another project
 | `?`           | show every key                                                      |
 | `q`           | quit                                                                |
 
-Each section of the reference (Model, Permissions, Sandbox, … Tools) has its
-own pane; pick one from the list on the left. Nested keys such as
+Each section of the reference (Model, Permissions, Sandbox, … Tools), plus
+Environment, Status line, and RTK, has its own pane; pick one from the list on the left. Nested keys such as
 `permissions.allow` live inside group rows (`permissions ›`); press `enter` to
 open one. The Tools pane also lists every Claude Code tool with an on/off
 toggle. Each row shows the value in effect and the file it comes
@@ -225,8 +225,10 @@ ccfg rtk on                     # or: ccfg rtk on -s project
 ccfg rtk status
 ```
 
-`ccfg rtk on` adds two `PreToolUse` hooks to the target settings file and
-leaves every other hook alone:
+`ccfg rtk on`, or the **RTK** section in the interactive editor, adds two
+`PreToolUse` hooks to the target settings file and leaves every other hook
+alone. In the editor each hook is a row; `tab` turns it on or off in the
+target file, and the details pane shows which hooks the file carries:
 
 - **Bash:** rtk's own `rtk hook claude`, the same entry `rtk init -g` writes.
   It rewrites commands, for example `cat f` to `rtk read f`.

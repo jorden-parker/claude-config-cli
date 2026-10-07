@@ -96,30 +96,46 @@ func entry(matcher, command string) map[string]any {
 // hook to f's PreToolUse hooks. Entries already there are left alone, and so
 // is every other hook.
 func Enable(f *store.File, readCommand string) error {
-	st := On(f)
-	list := preToolUse(f)
-	if !st.Bash {
-		list = append(list, entry("Bash", BashHook))
+	if err := SetBash(f, true); err != nil {
+		return err
 	}
-	if readCommand != "" && !st.Read {
-		list = append(list, entry("Read", readCommand))
+	if readCommand == "" {
+		return nil
 	}
-	return f.Set("hooks.PreToolUse", list)
+	return SetRead(f, true, readCommand)
 }
 
 // Disable removes the two hooks from f, leaving other hooks byte-identical.
-// Empty hooks objects left behind are removed too.
 func Disable(f *store.File) {
+	_ = SetBash(f, false)
+	_ = SetRead(f, false, "")
+}
+
+// SetBash adds or removes rtk's Bash hook.
+func SetBash(f *store.File, on bool) error {
+	return set(f, on, func(c string) bool { return c == BashHook }, entry("Bash", BashHook))
+}
+
+// SetRead adds or removes ccfg's Read hook. command is the hook command to
+// write when turning it on.
+func SetRead(f *store.File, on bool, command string) error {
+	return set(f, on, func(c string) bool { return strings.HasSuffix(c, readArgs) }, entry("Read", command))
+}
+
+// set removes every entry that match recognises and, when on, appends add.
+// Empty hooks objects left behind are removed too.
+func set(f *store.File, on bool, match func(string) bool, add map[string]any) error {
 	var kept []any
 	for _, e := range preToolUse(f) {
-		ours := hasCommand(e, func(c string) bool { return c == BashHook || strings.HasSuffix(c, readArgs) })
-		if !ours {
+		if !hasCommand(e, match) {
 			kept = append(kept, e)
 		}
 	}
+	if on {
+		kept = append(kept, add)
+	}
 	if len(kept) > 0 {
-		_ = f.Set("hooks.PreToolUse", kept)
-		return
+		return f.Set("hooks.PreToolUse", kept)
 	}
 	f.Unset("hooks.PreToolUse")
 	if v, ok := f.Get("hooks"); ok {
@@ -127,7 +143,11 @@ func Disable(f *store.File) {
 			f.Unset("hooks")
 		}
 	}
+	return nil
 }
+
+// DocURL is rtk's home.
+const DocURL = "https://github.com/rtk-ai/rtk"
 
 // ReadHook answers a PreToolUse call for the Read tool: it refuses the call
 // and names the shell commands to use instead. `sed -n` is suggested for the

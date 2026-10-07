@@ -18,6 +18,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/jorden-parker/claude-config-cli/internal/rtk"
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
 	"github.com/jorden-parker/claude-config-cli/internal/statusline"
 	"github.com/jorden-parker/claude-config-cli/internal/store"
@@ -124,7 +125,7 @@ func newModel(cwd string) *model {
 	m.st = newStyles(true)
 	m.reload()
 	m.sections = append([]string(nil), m.sch.Sections()...)
-	m.sections = append(m.sections, envSection, statusSection)
+	m.sections = append(m.sections, envSection, statusSection, rtkSection)
 	if !contains(m.sections, toolsSection) {
 		m.sections = append(m.sections, toolsSection)
 	}
@@ -389,6 +390,10 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setStatus("Status line rows change with tab. Nothing to remove.", false)
 				return m, nil
 			}
+			if isRTK(st) {
+				m.setStatus("RTK hooks are turned on and off with tab. Nothing to remove.", false)
+				return m, nil
+			}
 			if st == nil {
 				return m, nil
 			}
@@ -410,6 +415,9 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if isStatus(st) {
 					url = statusline.DocURL
+				}
+				if isRTK(st) {
+					url = rtk.DocURL
 				}
 				openURL(url)
 				m.setStatus("Opened docs in your browser: "+url, false)
@@ -534,6 +542,9 @@ func (m *model) startEdit() tea.Cmd {
 	if isStatus(st) {
 		return m.statusAct(st)
 	}
+	if isRTK(st) {
+		return m.rtkAct(st)
+	}
 	sc := m.targetScope(st)
 	if !store.Allowed(st, sc) {
 		m.setStatus(notReadHere(st, sc), true)
@@ -558,6 +569,9 @@ func (m *model) cycleValue() tea.Cmd {
 	}
 	if isStatus(st) {
 		return m.statusAct(st)
+	}
+	if isRTK(st) {
+		return m.rtkAct(st)
 	}
 	var opts []string
 	switch st.Kind {
@@ -707,6 +721,11 @@ func (m *model) refreshDoc() {
 		m.doc.GotoTop()
 		return
 	}
+	if isRTK(st) {
+		m.doc.SetContent(m.rtkDoc(st, w))
+		m.doc.GotoTop()
+		return
+	}
 	if toolName(st) != "" {
 		m.doc.SetContent(lipgloss.NewStyle().Width(w).Render(m.toolDoc(st, w)))
 		m.doc.GotoTop()
@@ -822,7 +841,7 @@ func (m *model) hints() []hint {
 	}
 	if isStatus(st) {
 		h = append(h, hint{"tab", "change"}, hint{"J K", "reorder"}, hint{"p", "run preview"}, back, hint{"s", "target file"}, hint{"/", "search all"}, hint{"[ ]", "section"})
-	} else if toolName(st) != "" {
+	} else if toolName(st) != "" || isRTK(st) {
 		h = append(h, hint{"tab", "turn on/off"}, back, hint{"s", "target file"}, hint{"/", "search all"}, hint{"[ ]", "section"})
 	} else if m.onGroup() {
 		h = append(h, hint{"enter", "open"}, back, hint{"s", "target file"}, hint{"/", "search all"}, hint{"[ ]", "section"})
@@ -959,6 +978,8 @@ func (m *model) listFooter(width int) string {
 		left = "● in use"
 	case isStatus(m.selected()):
 		left = "○ not in use yet"
+	case isRTK(m.selected()):
+		left = "● = hook in this file"
 	case len(m.path) > 0:
 		left = "esc back"
 	}
