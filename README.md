@@ -169,8 +169,9 @@ fails, times out after 3 seconds, or prints nothing, it is left out and the
 rest still renders.
 
 Spaces at either end of the existing command's rows are trimmed where they meet
-your fields, so the separator is the only gap and the rows line up. Colours and
-the spacing inside a row are left alone.
+your fields, so the separator is the only gap and the rows line up. A run of
+spaces anywhere in the line becomes one space, in the existing command's output
+too. Colours are left alone.
 
 Editors per value kind:
 

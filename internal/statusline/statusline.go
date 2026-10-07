@@ -36,7 +36,7 @@ const (
 var Positions = []string{ExistingStart, ExistingEnd, ExistingAbove, ExistingBelow, ExistingHidden}
 
 // Separators are the choices the editor cycles through. Any string is valid.
-var Separators = []string{"  ", " | ", " · ", " › "}
+var Separators = []string{" ", " | ", " · ", " › "}
 
 // DefaultFields is what a new status line shows when there is nothing to keep.
 var DefaultFields = []string{"model", "dir", "branch", "ctx_used"}
@@ -92,6 +92,7 @@ func Load(path string) (*Config, error) {
 	if c.Fields == nil {
 		c.Fields = []string{}
 	}
+	c.Separator = squeeze(c.Separator)
 	return c, nil
 }
 
@@ -139,8 +140,13 @@ func (c *Config) Move(id string, delta int) bool {
 }
 
 // Compose builds the status line from the JSON Claude Code sends on stdin and
-// the output of the existing command. Fields with nothing to show are dropped.
+// the output of the existing command. Fields with nothing to show are dropped,
+// and a run of spaces becomes one, in the existing output too.
 func Compose(c *Config, input []byte, inherited string, now time.Time) string {
+	return squeeze(compose(c, input, inherited, now))
+}
+
+func compose(c *Config, input []byte, inherited string, now time.Time) string {
 	in := parse(input, now)
 	var segs []string
 	for _, id := range c.Fields {
@@ -223,6 +229,30 @@ func tidy(out string) []string {
 		rows = append(rows, strings.Join(parts, ""))
 	}
 	return rows
+}
+
+// squeeze turns each run of spaces into one. Escape codes take no room on
+// screen, so spaces on either side of one count as the same run.
+func squeeze(s string) string {
+	var b strings.Builder
+	space := false
+	text := func(t string) {
+		for _, r := range t {
+			if r == ' ' && space {
+				continue
+			}
+			space = r == ' '
+			b.WriteRune(r)
+		}
+	}
+	pos := 0
+	for _, loc := range escape.FindAllStringIndex(s, -1) {
+		text(s[pos:loc[0]])
+		b.WriteString(s[loc[0]:loc[1]])
+		pos = loc[1]
+	}
+	text(s[pos:])
+	return b.String()
 }
 
 func paint(on bool, color, s string) string {

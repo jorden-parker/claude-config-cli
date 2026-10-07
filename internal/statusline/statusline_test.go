@@ -112,6 +112,35 @@ func TestComposeTrimsPaddingFromExistingStatusLine(t *testing.T) {
 	}
 }
 
+func TestComposeSqueezesRepeatedSpaces(t *testing.T) {
+	input := []byte(`{"model":{"display_name":"Opus"},"session_name":"a   b"}`)
+	c := plain("model", "session")
+	c.Separator = "  "
+	for existing, want := range map[string]string{
+		"":               "Opus a b",
+		"[CAVEMAN]":      "[CAVEMAN] Opus a b",
+		"x  y   z\nq  r": "x y z\nq r Opus a b",
+		// Spaces either side of a colour code are one run.
+		"\x1b[31mx \x1b[0m \x1b[32m y\x1b[0m": "\x1b[31mx \x1b[0m\x1b[32my\x1b[0m Opus a b",
+	} {
+		if got := Compose(c, input, existing, now); got != want {
+			t.Errorf("%q: got %q, want %q", existing, got, want)
+		}
+	}
+	// The existing line is squeezed even with no fields beside it.
+	if got := Compose(plain(), input, "x  y", now); got != "x y" {
+		t.Fatalf("got %q", got)
+	}
+	// A saved two-space separator loads as one space.
+	path := filepath.Join(t.TempDir(), "c.json")
+	if err := os.WriteFile(path, []byte(`{"separator":"  "}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if loaded, _ := Load(path); loaded.Separator != " " {
+		t.Fatalf("separator = %q", loaded.Separator)
+	}
+}
+
 func TestColorWrapsOnlyOwnFields(t *testing.T) {
 	c := plain("model")
 	c.Color = true

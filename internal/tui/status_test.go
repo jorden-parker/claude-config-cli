@@ -68,7 +68,7 @@ func TestStatusLineKeepsExistingCommandAndPreviewsIt(t *testing.T) {
 	selectKey(t, m, slField+"model")
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	run(m, cmd)
-	if doc = ansi.Strip(m.doc.GetContent()); !strings.Contains(doc, "[CAVEMAN]  Opus") {
+	if doc = ansi.Strip(m.doc.GetContent()); !strings.Contains(doc, "[CAVEMAN] Opus") {
 		t.Fatalf("preview should join the existing line and the new field:\n%s", doc)
 	}
 	if v, _ := m.files[store.ScopeUser].Get("statusLine"); statusline.CommandOf(v) != "printf [CAVEMAN]" {
@@ -88,10 +88,10 @@ func TestStatusLineKeepsExistingCommandAndPreviewsIt(t *testing.T) {
 	if err != nil || cfg.Inherited != "printf [CAVEMAN]" || !cfg.Has("model") {
 		t.Fatalf("config = %+v, %v", cfg, err)
 	}
-	if got := statusline.Render(statusline.ConfigPath(store.ScopeUser, m.cwd), []byte(`{"model":{"display_name":"Opus"}}`)); ansi.Strip(got) != "[CAVEMAN]  Opus" {
+	if got := statusline.Render(statusline.ConfigPath(store.ScopeUser, m.cwd), []byte(`{"model":{"display_name":"Opus"}}`)); ansi.Strip(got) != "[CAVEMAN] Opus" {
 		t.Fatalf("rendered %q", got)
 	}
-	if doc = ansi.Strip(m.doc.GetContent()); !strings.Contains(doc, "● in use") || !strings.Contains(doc, "[CAVEMAN]  Opus") {
+	if doc = ansi.Strip(m.doc.GetContent()); !strings.Contains(doc, "● in use") || !strings.Contains(doc, "[CAVEMAN] Opus") {
 		t.Fatalf("doc after turning on:\n%s", doc)
 	}
 
