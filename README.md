@@ -221,6 +221,34 @@ Scopes: `user` (default), `project`, `local`, `global`.
 `ccfg ls` includes the full description of each setting. Use `ccfg doc KEY`
 for its description, allowed values, default, scope, and example.
 
+## Snapshot and restore
+
+Save your settings before deleting Claude Code's configuration:
+
+```sh
+ccfg snapshot ~/claude-settings-snapshot.json
+# After your configuration reset:
+ccfg restore ~/claude-settings-snapshot.json
+```
+
+The snapshot includes existing user, global, project, and local settings, plus
+ccfg's status-line companion files. It preserves complete file contents,
+including unknown keys and settings edited outside ccfg. Missing files and
+managed settings are skipped. Plugins, external hook scripts, session history,
+and credentials stored elsewhere are not backed up; reinstall those separately.
+
+Choose a new snapshot filename outside `.claude`; existing snapshots are never
+replaced. The file is private (mode `0600`), but not encrypted, and may contain
+secrets from your settings. Keep it somewhere that survives your reset.
+
+Restore uses your current home and the original project's absolute directory.
+Use `ccfg restore FILE -C ~/new-project` to restore project and local settings
+elsewhere. Commands embedded in settings retain their original paths.
+Existing destination files cause restore to stop before writing anything;
+`--force` explicitly replaces files included in the snapshot. Other files are
+left alone. Each file is restored separately; an I/O failure reports how many
+files were restored before the failure. Restart Claude Code after restoring.
+
 ## Recipe: caveman mode with hooks and the status line badge
 
 [caveman](https://github.com/JuliusBrussee/caveman) ships as a Claude Code

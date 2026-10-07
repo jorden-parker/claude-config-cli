@@ -66,7 +66,7 @@ Pull up a terminal. Let's tinker.`,
 	root.PersistentFlags().StringVarP(&flagDir, "dir", "C", "", "project directory (default: current directory)")
 
 	statusline.Program = name
-	root.AddCommand(listCmd(), getCmd(), setCmd(), unsetCmd(), docCmd(), showCmd(), envCmd(), pathsCmd(), statuslineCmd())
+	root.AddCommand(listCmd(), getCmd(), setCmd(), unsetCmd(), docCmd(), showCmd(), envCmd(), pathsCmd(), statuslineCmd(), snapshotCmd(), restoreCmd())
 	return root
 }
 
