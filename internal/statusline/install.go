@@ -78,11 +78,20 @@ func shellPath(p string) string {
 	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
 }
 
-// Check runs a statusLine command once with the example session, the way
-// Claude Code would. A command that fails would blank the whole status line,
-// existing output included, so callers check before pointing settings at it.
+// checkArg makes the renderer validate itself without running any saved
+// status line command. Older binaries reject it, which is reported as an error.
+const checkArg = " --check"
+
+// Check runs ccfg's renderer command once in its no-execution mode with the
+// example session. A renderer that cannot run would blank the whole status
+// line, so callers check before pointing settings at it. The command must be
+// one built by Command; the saved status line command is never run here, and
+// there is no fallback to a normal render.
 func Check(command, cwd string) error {
-	if _, err := RunInherited(command, Sample(cwd, time.Now())); err != nil {
+	if !IsOurs(command) {
+		return fmt.Errorf("not checking %q: it is not %s's own renderer", command, Program)
+	}
+	if _, err := runShell(command+checkArg, Sample(cwd, time.Now())); err != nil {
 		return fmt.Errorf("the status line command does not run yet (%v). Install this version of %s first, for example with ./install.sh. Command: %s", err, Program, command)
 	}
 	return nil
@@ -91,7 +100,11 @@ func Check(command, cwd string) error {
 // Existing finds the status line command that ccfg's would sit beside for a
 // target scope, and the settings file it comes from. It looks in the target
 // file first, then at the value in effect from the other files. When that
-// value is already ccfg's renderer, the command it kept is returned instead.
+// value is already ccfg's renderer, the command it kept is returned instead,
+// with the file that command originally came from. That origin never exceeds
+// the wrapper's own: a project or local wrapper stays project or local, and a
+// user or managed wrapper needs a recognised recorded origin. An empty scope
+// means the origin is unknown.
 func Existing(files map[store.Scope]*store.File, target store.Scope, cwd string) (string, store.Scope) {
 	order := []store.Scope{target, store.ScopeManaged, store.ScopeLocal, store.ScopeProject, store.ScopeUser}
 	for _, sc := range order {
@@ -105,12 +118,28 @@ func Existing(files map[store.Scope]*store.File, target store.Scope, cwd string)
 		}
 		command := CommandOf(v)
 		if IsOurs(command) {
-			c, _ := Load(ConfigPath(sc, cwd))
-			command = c.Inherited
+			c, err := Load(ConfigPath(sc, cwd))
+			if err != nil {
+				return "", ""
+			}
+			return c.Inherited, boundedOrigin(sc, c.InheritedScope)
 		}
 		return command, sc
 	}
 	return "", ""
+}
+
+// boundedOrigin is the origin to believe for a command kept by a wrapper in
+// the wrapper scope's file.
+func boundedOrigin(wrapper, recorded store.Scope) store.Scope {
+	if wrapper != store.ScopeUser && wrapper != store.ScopeManaged {
+		return wrapper
+	}
+	switch recorded {
+	case store.ScopeUser, store.ScopeProject, store.ScopeLocal, store.ScopeManaged:
+		return recorded
+	}
+	return ""
 }
 
 // On reports whether a settings file's statusLine is ccfg's renderer.
@@ -123,10 +152,11 @@ func On(f *store.File) bool {
 }
 
 // Enable points statusLine in f at command and records what it replaces in c.
-// existing is the command to keep showing when f itself sets none. Other keys
+// existing is the command to keep showing when f itself sets none, and
+// existingScope is the file it came from. Other keys
 // of the statusLine object, such as padding and refreshInterval, are kept.
 // The caller saves c first, then f.
-func Enable(f *store.File, c *Config, command, existing string) error {
+func Enable(f *store.File, c *Config, command, existing string, existingScope store.Scope) error {
 	cur, has := f.Get("statusLine")
 	next := map[string]any{}
 	if obj, ok := cur.(map[string]any); ok {
@@ -135,9 +165,12 @@ func Enable(f *store.File, c *Config, command, existing string) error {
 		}
 	}
 	if !IsOurs(CommandOf(cur)) {
-		c.Inherited = CommandOf(cur)
+		c.Inherited, c.InheritedScope = CommandOf(cur), f.Scope
 		if c.Inherited == "" && !IsOurs(existing) {
-			c.Inherited = existing
+			c.Inherited, c.InheritedScope = existing, existingScope
+		}
+		if c.Inherited == "" {
+			c.InheritedScope = ""
 		}
 		c.Previous = nil
 		if has {

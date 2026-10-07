@@ -54,6 +54,10 @@ type Config struct {
 	// Inherited is the status line command that was in place before ccfg's.
 	// The renderer runs it with the same input and includes its output.
 	Inherited string `json:"inherited,omitempty"`
+	// InheritedScope is the settings file Inherited came from. It records where
+	// the command came from, not that anyone approved it: only a user or managed
+	// wrapper lets it count, and absent or unrecognised values mean unknown.
+	InheritedScope store.Scope `json:"inheritedScope,omitempty"`
 	// Previous is the statusLine value ccfg replaced in the settings file,
 	// put back as it was when the status line is turned off.
 	Previous any `json:"previous,omitempty"`
@@ -265,7 +269,9 @@ func paint(on bool, color, s string) string {
 // RunInherited runs an existing status line command the way Claude Code does:
 // in a shell, with the session JSON on stdin. A failure, a timeout, or a
 // non-zero exit returns an error, and the caller leaves that part out.
-func RunInherited(command string, input []byte) (string, error) {
+func RunInherited(command string, input []byte) (string, error) { return runShell(command, input) }
+
+func runShell(command string, input []byte) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), inheritedTimeout)
 	defer cancel()
 	shell, flag := "sh", "-c"
@@ -310,6 +316,19 @@ func Render(configPath string, input []byte) string {
 		out, _ = RunInherited(c.Inherited, input)
 	}
 	return Compose(c, input, out, time.Now())
+}
+
+// CheckRender is what `render --check` does: read the config and compose
+// ccfg's own fields, without running the saved status line command. A missing
+// config is fine, since the first activation has none yet. A config that
+// cannot be read or parsed is an error, so a broken companion is not saved over.
+func CheckRender(configPath string, input []byte) error {
+	c, err := Load(resolve(configPath, input))
+	if err != nil {
+		return err
+	}
+	Compose(c, input, "", time.Now())
+	return nil
 }
 
 // resolve expands ~ and anchors a relative path at the project directory, so

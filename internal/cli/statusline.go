@@ -97,14 +97,17 @@ func statuslineOnCmd() *cobra.Command {
 				cfg.Color = !noColor
 			}
 			f := files[scope]
-			kept, _ := statusline.Existing(files, scope, cwd())
-			if err := statusline.Enable(f, cfg, statusline.Command(scope, cwd()), kept); err != nil {
+			kept, keptFrom := statusline.Existing(files, scope, cwd())
+			command := statusline.Command(scope, cwd())
+			if err := statusline.Enable(f, cfg, command, kept, keptFrom); err != nil {
+				return err
+			}
+			// Check the renderer before the config is published. This does not
+			// run the kept command.
+			if err := statusline.Check(command, cwd()); err != nil {
 				return err
 			}
 			if err := statusline.Save(path, cfg); err != nil {
-				return err
-			}
-			if err := statusline.Check(statusline.Command(scope, cwd()), cwd()); err != nil {
 				return err
 			}
 			if err := f.Save(); err != nil {
@@ -212,17 +215,24 @@ func statuslineFieldsCmd() *cobra.Command {
 
 func statuslineRenderCmd() *cobra.Command {
 	var config string
+	var check bool
 	c := &cobra.Command{
 		Use:   "render",
 		Short: "Render the status line from session JSON on stdin (run by Claude Code)",
 		Args:  cobra.NoArgs,
-		Run: func(cmd *cobra.Command, args []string) {
-			// Always exit 0: a non-zero exit blanks the whole status line.
+		RunE: func(cmd *cobra.Command, args []string) error {
 			input, _ := io.ReadAll(os.Stdin)
+			if check {
+				cmd.SilenceUsage = true
+				return statusline.CheckRender(config, input)
+			}
+			// Always exit 0: a non-zero exit blanks the whole status line.
 			fmt.Println(statusline.Render(config, input))
+			return nil
 		},
 	}
 	c.Flags().StringVar(&config, "config", "", "status line config file")
+	c.Flags().BoolVar(&check, "check", false, "only check that the renderer and config work; never runs the kept command")
 	return c
 }
 

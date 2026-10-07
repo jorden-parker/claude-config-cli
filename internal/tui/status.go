@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -46,6 +47,27 @@ type statusState struct {
 	out      string
 	runErr   string
 	running  bool
+
+	// Activation check in flight, if any. Only the event loop touches these.
+	activation *statusActivation
+	requests   int // last activation request ID handed out
+}
+
+// statusActivation is the private copy of everything an activation will write,
+// held until the renderer check for its request ID comes back.
+type statusActivation struct {
+	id      int
+	scope   store.Scope
+	path    string // companion config file
+	staged  *store.File
+	cfg     *statusline.Config
+	message string
+}
+
+// statusActivateMsg is the result of the renderer check for one request.
+type statusActivateMsg struct {
+	id  int
+	err error
 }
 
 type statusPreviewMsg struct {
@@ -220,6 +242,8 @@ func (m *model) statusRefresh(key string) tea.Cmd {
 
 // statusToggleUse turns ccfg's status line on or off in the target file.
 // It works on copies so a failed save does not change the displayed state.
+// Turning it on checks the renderer in a command, without running the kept
+// status line command, and statusActivated saves once the check passes.
 func (m *model) statusToggleUse() tea.Cmd {
 	sc := m.scope
 	if err := m.errs[sc]; err != nil {
@@ -233,6 +257,7 @@ func (m *model) statusToggleUse() tea.Cmd {
 		err = json.Unmarshal(b, &staged.Data)
 	}
 	cfg := *m.sl.cfg
+	cfg.Fields = append([]string{}, cfg.Fields...)
 	var msg string
 	if err == nil && statusline.On(&staged) {
 		if err = statusline.Disable(&staged, &cfg); err == nil {
@@ -243,18 +268,18 @@ func (m *model) statusToggleUse() tea.Cmd {
 			msg = "Status line off. Put back " + short(statusline.CommandOf(v), 40) + " in " + tildify(staged.Path)
 		}
 	} else if err == nil {
-		if err = statusline.Enable(&staged, &cfg, statusline.Command(sc, m.cwd), m.sl.kept); err == nil {
-			err = statusline.Save(m.statusPath(), &cfg)
-		}
-		if err == nil {
-			err = statusCheck(statusline.Command(sc, m.cwd), m.cwd)
-		}
-		if err == nil {
-			err = staged.Save()
-		}
-		msg = "Status line on in " + tildify(staged.Path)
-		if cfg.Inherited != "" {
-			msg += ". Kept " + short(cfg.Inherited, 40)
+		command := statusline.Command(sc, m.cwd)
+		if err = statusline.Enable(&staged, &cfg, command, m.sl.kept, m.sl.keptFrom); err == nil {
+			msg = "Status line on in " + tildify(staged.Path)
+			if cfg.Inherited != "" {
+				msg += ". Kept " + short(cfg.Inherited, 40)
+			}
+			m.sl.requests++
+			id, check, cwd := m.sl.requests, statusCheck, m.cwd
+			m.sl.activation = &statusActivation{id: id, scope: sc, path: m.statusPath(), staged: &staged, cfg: &cfg, message: msg}
+			m.mode = modeActivating
+			m.setStatus("Checking status line… Esc cancels", false)
+			return func() tea.Msg { return statusActivateMsg{id: id, err: check(command, cwd)} }
 		}
 	}
 	if err != nil {
@@ -264,6 +289,47 @@ func (m *model) statusToggleUse() tea.Cmd {
 	m.files[sc], m.sl.cfg = &staged, &cfg
 	m.setStatus(msg, false)
 	return m.statusRefresh(slUse)
+}
+
+// statusActivated finishes an activation: a passing check saves the companion
+// config and then the settings file. A result for a cancelled or replaced
+// request is dropped.
+func (m *model) statusActivated(msg statusActivateMsg) tea.Cmd {
+	a := m.sl.activation
+	if a == nil || a.id != msg.id {
+		return nil
+	}
+	m.sl.activation, m.mode = nil, modeBrowse
+	err := msg.err
+	if err == nil {
+		if err = statusline.Save(a.path, a.cfg); err == nil {
+			err = a.staged.Save()
+		}
+	}
+	if err != nil {
+		m.setStatus("Not saved: "+err.Error(), true)
+		return nil
+	}
+	m.files[a.scope], m.sl.cfg = a.staged, a.cfg
+	m.setStatus(a.message, false)
+	return m.statusRefresh(slUse)
+}
+
+// updateActivating handles input while the renderer check runs: Esc cancels,
+// quit quits, and everything else waits so the target cannot change underneath.
+func (m *model) updateActivating(msg tea.Msg) tea.Cmd {
+	k, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return nil
+	}
+	switch {
+	case key.Matches(k, keys.quit):
+		return tea.Quit
+	case key.Matches(k, keys.esc):
+		m.sl.activation, m.mode = nil, modeBrowse
+		m.setStatus("Cancelled. The status line was not changed.", false)
+	}
+	return nil
 }
 
 // statusKey handles the keys only status line rows have.
@@ -329,14 +395,22 @@ func (m *model) statusDoc(st *schema.Setting, w int) string {
 		b.WriteString(s.faint.Render("none set") + "\n")
 	default:
 		b.WriteString(wrap.Render(m.sl.kept) + "\n")
-		b.WriteString(s.subtle.Render(fmt.Sprintf("from the %s file · placed: %s", m.sl.keptFrom, m.sl.cfg.Existing)) + "\n")
+		from := "origin unknown"
+		if m.sl.keptFrom != "" {
+			from = fmt.Sprintf("from the %s file", m.sl.keptFrom)
+		}
+		b.WriteString(s.subtle.Render(fmt.Sprintf("%s · placed: %s", from, m.sl.cfg.Existing)) + "\n")
 		switch {
 		case m.sl.cfg.Existing == statusline.ExistingHidden:
 			b.WriteString(s.subtle.Render(wrap.Render("Hidden, so it is not run.")) + "\n")
 		case m.sl.running:
 			b.WriteString(s.subtle.Render("Running it for the preview…") + "\n")
 		case m.sl.ranFor != m.sl.kept:
-			b.WriteString(s.warn.Render(wrap.Render(fmt.Sprintf("Not run yet: it comes from the %s file, which a repository can supply. Press p to run it for the preview.", m.sl.keptFrom))) + "\n")
+			why := "its origin is unknown"
+			if m.sl.keptFrom != "" {
+				why = fmt.Sprintf("it comes from the %s file, which a repository can supply", m.sl.keptFrom)
+			}
+			b.WriteString(s.warn.Render(wrap.Render("Not run yet: "+why+". Press p to run it for the preview.")) + "\n")
 		case m.sl.runErr != "":
 			b.WriteString(s.warn.Render(wrap.Render("Left out of the preview: "+m.sl.runErr)) + "\n")
 		case strings.TrimSpace(m.sl.out) == "":

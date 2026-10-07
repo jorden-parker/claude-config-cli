@@ -159,7 +159,17 @@ appears beside the fields you pick, in the preview and in Claude Code.
 - **Existing status line** places the kept output at the start or end of the
   line, on its own row above or below, or hides it.
 - A command from the project or local file is not run for the preview until you
-  press **p**, because a repository can supply those files.
+  press **p**, because a repository can supply those files. A command whose
+  origin is unknown is treated the same way.
+- Turning the status line on checks that the renderer runs, without running
+  your saved command (`ccfg statusline render --check`). The check runs in the
+  background, and **Esc** cancels it. Claude Code runs the saved command as
+  usual when it draws the status line, and **p** is how you run an untrusted
+  or unknown-origin command for the preview.
+- The config records which file the kept command came from. A project or local
+  config never counts as trusted, whatever it says. A config written by an
+  older version has no record, so its kept command needs **p** until you turn
+  the status line off and on again.
 
 Your picks live next to the settings file: `~/.claude/ccfg-statusline.json` for
 user settings, `.claude/ccfg-statusline.json` for project settings, and

@@ -36,6 +36,7 @@ const (
 	modeHelp
 	modePalette
 	modeScope
+	modeActivating // checking the status line renderer before turning it on
 )
 
 // editChrome is the rows around the edit form: padding plus its heading.
@@ -269,6 +270,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusPreviewMsg:
 		m.statusPreviewDone(msg)
 		return m, nil
+	case statusActivateMsg:
+		return m, m.statusActivated(msg)
 	case tea.BackgroundColorMsg:
 		m.isDark = msg.IsDark()
 		m.st = newStyles(m.isDark)
@@ -288,6 +291,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch m.mode {
+	case modeActivating:
+		return m, m.updateActivating(msg)
 	case modePalette, modeScope:
 		return m.updatePalette(msg)
 	case modeEdit:
@@ -845,6 +850,8 @@ func (m *model) hints() []hint {
 		return []hint{{"esc", "close"}, {"↑ ↓", "scroll"}}
 	case m.mode == modeConfirmUnset:
 		return []hint{{"y", "remove"}, {"n", "keep"}}
+	case m.mode == modeActivating:
+		return []hint{{"esc", "cancel"}, {"q", "quit"}}
 	case l.SettingFilter():
 		return []hint{{"enter", "apply filter"}, {"esc", "cancel"}}
 	}
@@ -961,6 +968,8 @@ func (m *model) statusLine() string {
 			sc := m.targetScope(st)
 			status = m.st.warn.Render(fmt.Sprintf("Remove %s from the %s file (%s)?", st.Key, sc, tildify(store.Path(sc, m.cwd))))
 		}
+	case m.mode == modeActivating:
+		status = m.st.subtle.Render(m.status)
 	case m.status != "" && m.statusErr:
 		status = m.st.err.Render("✕ " + m.status)
 	case m.status != "":

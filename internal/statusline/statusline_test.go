@@ -214,7 +214,7 @@ func TestEnableKeepsAndDisableRestores(t *testing.T) {
 	}
 
 	for i := 0; i < 2; i++ { // enabling twice must not wrap the renderer in itself
-		if err := Enable(f, c, command, ""); err != nil {
+		if err := Enable(f, c, command, "", ""); err != nil {
 			t.Fatal(err)
 		}
 		v, _ := f.Get("statusLine")
@@ -255,7 +255,7 @@ func TestEnableWithNothingToKeep(t *testing.T) {
 		t.Fatalf("project command = %q", command)
 	}
 	// The user file's command is carried over when the project file sets none.
-	if err := Enable(f, c, command, "~/.claude/statusline.sh"); err != nil {
+	if err := Enable(f, c, command, "~/.claude/statusline.sh", store.ScopeUser); err != nil {
 		t.Fatal(err)
 	}
 	if c.Inherited != "~/.claude/statusline.sh" || c.Previous != nil {
@@ -270,7 +270,7 @@ func TestEnableWithNothingToKeep(t *testing.T) {
 
 	fresh := Default()
 	g, _ := store.Open(store.ScopeLocal, cwd)
-	if err := Enable(g, fresh, Command(store.ScopeLocal, cwd), ""); err != nil {
+	if err := Enable(g, fresh, Command(store.ScopeLocal, cwd), "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(fresh.Fields, ",") != strings.Join(DefaultFields, ",") {
@@ -293,7 +293,7 @@ func TestExistingFollowsOurOwnRenderer(t *testing.T) {
 	}
 
 	c := Default()
-	if err := Enable(user, c, Command(store.ScopeUser, cwd), ""); err != nil {
+	if err := Enable(user, c, Command(store.ScopeUser, cwd), "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := Save(ConfigPath(store.ScopeUser, cwd), c); err != nil {
@@ -369,5 +369,164 @@ func TestShellPath(t *testing.T) {
 		if got := shellPath(in); got != want {
 			t.Errorf("shellPath(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// openWrapped opens a settings file for scope whose statusLine is ccfg's
+// renderer, with companion as the text of its config file ("" writes none).
+func openWrapped(t *testing.T, scope store.Scope, cwd, companion string) *store.File {
+	t.Helper()
+	f, err := store.Open(scope, cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Set("statusLine", map[string]any{"type": "command", "command": Command(scope, cwd)}); err != nil {
+		t.Fatal(err)
+	}
+	if companion != "" {
+		path := ConfigPath(scope, cwd)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(companion), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return f
+}
+
+func TestCheckRenderDoesNotRunInherited(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses sh")
+	}
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "ran")
+	path := filepath.Join(dir, "ccfg-statusline.json")
+	input := []byte(`{"model":{"display_name":"Opus"},"workspace":{"project_dir":"` + dir + `"}}`)
+	c := plain("model")
+	c.Inherited = "touch '" + marker + "'; echo INHERITED"
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckRender(path, input); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("CheckRender ran the inherited command")
+	}
+	// Check only ever runs ccfg's own renderer command.
+	if err := Check("touch '"+marker+"'", dir); err == nil {
+		t.Fatal("Check accepted a command that is not the renderer")
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("Check ran a command that is not the renderer")
+	}
+	// A normal render does run it.
+	if got := Render(path, input); !strings.Contains(got, "INHERITED") {
+		t.Fatalf("render = %q", got)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal("Render should run the inherited command")
+	}
+}
+
+func TestCheckRenderRejectsInvalidConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ccfg-statusline.json")
+	if err := CheckRender(path, nil); err != nil {
+		t.Fatalf("a missing config is fine for a first activation: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckRender(path, nil); err == nil {
+		t.Fatal("a malformed config was accepted")
+	}
+}
+
+func TestInheritedScopeRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cwd := t.TempDir()
+	user, _ := store.Open(store.ScopeUser, cwd)
+	_ = user.Set("statusLine", map[string]any{"type": "command", "command": "badge.sh"})
+	project, _ := store.Open(store.ScopeProject, cwd)
+	files := map[store.Scope]*store.File{store.ScopeUser: user, store.ScopeProject: project}
+
+	// Project settings inherit the user's command and remember where it came from.
+	kept, from := Existing(files, store.ScopeProject, cwd)
+	c := Default()
+	if err := Enable(project, c, Command(store.ScopeProject, cwd), kept, from); err != nil {
+		t.Fatal(err)
+	}
+	if c.InheritedScope != store.ScopeUser {
+		t.Fatalf("scope = %q", c.InheritedScope)
+	}
+	// Enabling again keeps the captured origin.
+	if err := Enable(project, c, Command(store.ScopeProject, cwd), "other.sh", store.ScopeProject); err != nil {
+		t.Fatal(err)
+	}
+	if c.Inherited != "badge.sh" || c.InheritedScope != store.ScopeUser {
+		t.Fatalf("re-enable changed %q from %q", c.Inherited, c.InheritedScope)
+	}
+	if err := Save(ConfigPath(store.ScopeProject, cwd), c); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(ConfigPath(store.ScopeProject, cwd))
+	if err != nil || loaded.InheritedScope != store.ScopeUser {
+		t.Fatalf("loaded %+v, %v", loaded, err)
+	}
+	// After a reload the project wrapper is still a project file's command.
+	if got, from := Existing(files, store.ScopeProject, cwd); got != "badge.sh" || from != store.ScopeProject {
+		t.Fatalf("after reload: %q from %q", got, from)
+	}
+
+	// A command set directly in the target file is that file's.
+	direct, _ := store.Open(store.ScopeLocal, cwd)
+	_ = direct.Set("statusLine", map[string]any{"type": "command", "command": "mine.sh"})
+	d := Default()
+	if err := Enable(direct, d, Command(store.ScopeLocal, cwd), "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if d.InheritedScope != store.ScopeLocal {
+		t.Fatalf("direct scope = %q", d.InheritedScope)
+	}
+}
+
+func TestWrappedCommandTrust(t *testing.T) {
+	cases := []struct {
+		name      string
+		scope     store.Scope
+		companion string
+		want      store.Scope
+		command   string
+	}{
+		{"user wrapper keeps user origin", store.ScopeUser, `{"inherited":"a.sh","inheritedScope":"user"}`, store.ScopeUser, "a.sh"},
+		{"user wrapper keeps project origin", store.ScopeUser, `{"inherited":"a.sh","inheritedScope":"project"}`, store.ScopeProject, "a.sh"},
+		{"legacy companion is unknown", store.ScopeUser, `{"inherited":"a.sh"}`, "", "a.sh"},
+		{"invalid origin is unknown", store.ScopeUser, `{"inherited":"a.sh","inheritedScope":"global"}`, "", "a.sh"},
+		{"malformed companion confers nothing", store.ScopeUser, `{not json`, "", ""},
+		{"project wrapper cannot claim user", store.ScopeProject, `{"inherited":"a.sh","inheritedScope":"user"}`, store.ScopeProject, "a.sh"},
+		{"local wrapper cannot claim managed", store.ScopeLocal, `{"inherited":"a.sh","inheritedScope":"managed"}`, store.ScopeLocal, "a.sh"},
+		{"legacy project wrapper stays project", store.ScopeProject, `{"inherited":"a.sh"}`, store.ScopeProject, "a.sh"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			cwd := t.TempDir()
+			f := openWrapped(t, tc.scope, cwd, tc.companion)
+			files := map[store.Scope]*store.File{tc.scope: f}
+			if got, from := Existing(files, tc.scope, cwd); got != tc.command || from != tc.want {
+				t.Fatalf("got %q from %q, want %q from %q", got, from, tc.command, tc.want)
+			}
+		})
+	}
+
+	// A command set directly in the user file keeps its origin.
+	t.Setenv("HOME", t.TempDir())
+	cwd := t.TempDir()
+	user, _ := store.Open(store.ScopeUser, cwd)
+	_ = user.Set("statusLine", map[string]any{"type": "command", "command": "mine.sh"})
+	if got, from := Existing(map[store.Scope]*store.File{store.ScopeUser: user}, store.ScopeProject, cwd); got != "mine.sh" || from != store.ScopeUser {
+		t.Fatalf("direct: %q from %q", got, from)
 	}
 }
