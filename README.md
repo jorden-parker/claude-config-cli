@@ -241,13 +241,15 @@ plugin. Its installer wires the plugin, the Claude Code hooks, and the
 `[CAVEMAN]` status line badge in one go (Node.js 22.13 or newer):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/v3.1.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/v3.1.0/install.sh | bash -s -- --only claude --with-hooks --force
 ```
 
-From a checkout, the same installer runs as `node bin/install.js --all`;
-`--dry-run --all` shows what it would write first, `--only claude` limits it
-to Claude Code, and `--no-hooks` skips the hook files. Plugin only, without
-the hooks or the badge:
+`bash -s --` passes the flags through to the installer: `--only claude`
+limits it to Claude Code, `--with-hooks` wires the hooks into
+`settings.json`, and `--force` reinstalls a plugin that is already there.
+From a checkout, the same installer runs as `node bin/install.js` with the
+same flags; add `--dry-run` to see what it would write first. Plugin only,
+without the hooks or the badge:
 
 ```sh
 claude plugin marketplace add JuliusBrussee/caveman && claude plugin install caveman@caveman
