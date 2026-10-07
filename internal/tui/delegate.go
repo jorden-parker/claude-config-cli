@@ -11,10 +11,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// rowDelegate draws the key and effective value above a description preview.
+// rowDescLines is how many wrapped description lines each row shows.
+const rowDescLines = 3
+
+// rowDelegate draws the key and effective value above a wrapped description.
 type rowDelegate struct{ st styles }
 
-func (rowDelegate) Height() int                         { return 2 }
+func (rowDelegate) Height() int                         { return 1 + rowDescLines }
 func (rowDelegate) Spacing() int                        { return 0 }
 func (rowDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
 
@@ -90,6 +93,14 @@ func (d rowDelegate) Render(w io.Writer, lm list.Model, index int, li list.Item)
 	}
 	gap := max(1, width-2-lipgloss.Width(keyView)-lipgloss.Width(right))
 	fmt.Fprint(w, gutter+keyView+fmt.Sprintf("%*s", gap, "")+right)
+	// Wrap the description over the row's remaining lines; only what still
+	// doesn't fit is cut, and the details pane always shows the full text.
 	desc := strings.Join(strings.Fields(it.st.Desc), " ")
-	fmt.Fprint(w, "\n  "+s.subtle.Render(ansi.Truncate(desc, max(1, width-2), "…")))
+	lines := strings.Split(ansi.Wrap(desc, max(1, width-2), ""), "\n")
+	if n := rowDescLines; len(lines) > n {
+		lines = append(lines[:n-1], ansi.Truncate(strings.Join(lines[n-1:], " "), max(1, width-2), "…"))
+	}
+	for _, l := range lines {
+		fmt.Fprint(w, "\n  "+s.subtle.Render(l))
+	}
 }

@@ -65,8 +65,9 @@ func TestSurpriseMeOnlyNavigates(t *testing.T) {
 		t.Fatal("surprise me did not reveal a different setting")
 	}
 	for range 30 {
-		previous := m.selected().Key
 		m.startSearch()
+		// Searching can move the selection; discovery must leave whatever is selected now.
+		previous := m.selected().Key
 		m.discoverSetting()
 		if m.selected().Key == previous || m.selected().Deprecated != "" || m.onGroup() || m.searching {
 			t.Fatal("discovery did not leave search and reveal a new editable setting")

@@ -750,7 +750,8 @@ func (m *model) ladder(st *schema.Setting, w int) string {
 	if !won {
 		marker = s.set.Render("● ")
 	}
-	b.WriteString(marker + s.subtle.Render(fmt.Sprintf("%-9s", "default")) + " " + s.subtle.Render(short(def, max(4, w-12))) + "\n")
+	defWrap := lipgloss.NewStyle().Width(max(4, w-12))
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, marker+s.subtle.Render(fmt.Sprintf("%-9s", "default"))+" ", s.subtle.Render(defWrap.Render(def))) + "\n")
 	if !store.Allowed(st, target) {
 		b.WriteString("\n" + s.warn.Width(w).Render(notReadHere(st, target)) + "\n")
 	}

@@ -29,9 +29,6 @@ type editState struct {
 func newEdit(st *schema.Setting, current any, sch *schema.Schema, width, height int, isDark bool) *editState {
 	e := &editState{st: st}
 	desc := st.Desc
-	if runes := []rune(desc); len(runes) > 300 {
-		desc = string(runes[:299]) + "…"
-	}
 	title := fmt.Sprintf("%s  (%s)", st.Key, st.Kind)
 	var groups []*huh.Group
 
