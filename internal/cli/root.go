@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/fang"
 	"github.com/spf13/cobra"
 
-	"github.com/jorden-parker/claude-config-cli/internal/rtk"
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
 	"github.com/jorden-parker/claude-config-cli/internal/statusline"
 	"github.com/jorden-parker/claude-config-cli/internal/store"
@@ -67,8 +66,7 @@ Pull up a terminal. Let's tinker.`,
 	root.PersistentFlags().StringVarP(&flagDir, "dir", "C", "", "project directory (default: current directory)")
 
 	statusline.Program = name
-	rtk.Program = name
-	root.AddCommand(listCmd(), getCmd(), setCmd(), unsetCmd(), docCmd(), showCmd(), envCmd(), pathsCmd(), statuslineCmd(), rtkCmd())
+	root.AddCommand(listCmd(), getCmd(), setCmd(), unsetCmd(), docCmd(), showCmd(), envCmd(), pathsCmd(), statuslineCmd())
 	return root
 }
 

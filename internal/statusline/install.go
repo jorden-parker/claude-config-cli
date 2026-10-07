@@ -44,10 +44,6 @@ func Command(scope store.Scope, cwd string) string {
 	return shellPath(binary()) + renderArgs + shellPath(ConfigPath(scope, cwd))
 }
 
-// ProgramPath is the installed binary, written the way a shell reads it, for
-// other hooks ccfg registers in settings.
-func ProgramPath() string { return shellPath(binary()) }
-
 func binary() string {
 	exe, err := executable()
 	// A `go run` or test binary is deleted when it exits; use the installed one.

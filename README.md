@@ -75,8 +75,8 @@ ccfg -C ~/repo                  # another project
 | `?`           | show every key                                                      |
 | `q`           | quit                                                                |
 
-Each section of the reference (Model, Permissions, Sandbox, … Tools), plus
-Environment, Status line, and RTK, has its own pane; pick one from the list on the left. Nested keys such as
+Each section of the reference (Model, Permissions, Sandbox, … Tools) has its
+own pane; pick one from the list on the left. Nested keys such as
 `permissions.allow` live inside group rows (`permissions ›`); press `enter` to
 open one. The Tools pane also lists every Claude Code tool with an on/off
 toggle. Each row shows the value in effect and the file it comes
@@ -214,56 +214,12 @@ ccfg statusline fields          # every status line field and the data it reads
 ccfg statusline preview         # render it for the docs' example session
 ccfg statusline on --fields model,branch,ctx_used --existing end
 ccfg statusline off             # put the previous status line back
-ccfg rtk on                     # route command output through rtk (see the recipe below)
-ccfg rtk status
-ccfg rtk off
 ```
 
 Scopes: `user` (default), `project`, `local`, `global`.
 
 `ccfg ls` includes the full description of each setting. Use `ccfg doc KEY`
 for its description, allowed values, default, scope, and example.
-
-## Recipe: route command output through RTK
-
-[RTK](https://github.com/rtk-ai/rtk) shortens the output of shell commands
-such as `grep`, `pnpm test`, and `bun test` before Claude Code reads it.
-
-```sh
-brew install rtk
-ccfg rtk on                     # or: ccfg rtk on -s project
-ccfg rtk status
-```
-
-`ccfg rtk on`, or the **RTK** section in the interactive editor, adds two
-`PreToolUse` hooks to the target settings file and leaves every other hook
-alone. In the editor each hook is a row; `tab` turns it on or off in the
-target file, and the details pane shows which hooks the file carries:
-
-- **Bash:** rtk's own `rtk hook claude`, the same entry `rtk init -g` writes.
-  It rewrites commands, for example `cat f` to `rtk read f`.
-- **Read:** `ccfg rtk read-hook`, which refuses the built-in `Read` tool and
-  tells Claude to run `rtk read` in Bash instead. Built-in tools never pass
-  through the Bash hook, so this is the only way to send reads through rtk.
-  Pass `--keep-read` to skip it.
-
-`Grep` and `Glob` need nothing: on macOS and Linux, Claude Code leaves them
-out of the default tool set and searches with `find` and `grep` through
-`Bash` ([tools reference](https://code.claude.com/docs/en/tools-reference)).
-
-Edits keep working. Claude Code accepts a plain `cat`, `head`, `tail`,
-`sed -n 'X,Yp'`, or `grep` on a single file as the read that must come before
-an `Edit`. rtk rewrites `cat`, `head`, and `tail` to `rtk read`, which does not
-count, but leaves `sed` alone, so the Read hook's message suggests `sed -n`.
-Refusing `Read` also turns off the newer models' shortcut of editing a file
-without reading it first.
-
-`ccfg rtk off` removes the two entries. Restart Claude Code after either
-command; hooks are read once at session start. Check savings after a session
-with `rtk gain`. Commands that must stay raw go in `exclude_commands` under
-`[hooks]` in rtk's `config.toml` (`~/Library/Application Support/rtk/config.toml`
-on macOS). rtk's awareness notes for `CLAUDE.md` come from
-`rtk init -g --no-patch`, which prints a hook snippet you can ignore.
 
 ## Recipe: caveman mode with hooks and the status line badge
 

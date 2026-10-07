@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/jorden-parker/claude-config-cli/internal/rtk"
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
 	"github.com/jorden-parker/claude-config-cli/internal/store"
 )
@@ -87,9 +86,6 @@ func (m *model) levelItems() []list.Item {
 	if m.section() == statusSection {
 		return m.statusItems()
 	}
-	if m.section() == rtkSection {
-		return m.rtkItems()
-	}
 	prefix := m.levelPrefix()
 	parents := m.parents()
 	seen := map[string]bool{}
@@ -156,7 +152,6 @@ func (m *model) searchItems() []list.Item {
 			out = append(out, li)
 		}
 	}
-	out = append(out, m.rtkItems()...)
 	return append(out, m.toolItems()...)
 }
 
@@ -234,9 +229,6 @@ func (m *model) reveal(key string) {
 	}
 	if strings.HasPrefix(key, "statusline.") {
 		section = statusSection
-	}
-	if strings.HasPrefix(key, "rtk.") {
-		section = rtkSection
 	}
 	if st := m.sch.Get(key); st != nil {
 		section = st.Section
@@ -385,16 +377,6 @@ func (m *model) sectionCount(section string) int {
 	}
 	if section == statusSection {
 		return len(m.sl.cfg.Fields)
-	}
-	if section == rtkSection {
-		st := rtk.On(m.files[m.scope])
-		if st.Bash {
-			n++
-		}
-		if st.Read {
-			n++
-		}
-		return n
 	}
 	for i := range m.sch.Settings {
 		st := &m.sch.Settings[i]
