@@ -206,6 +206,29 @@ Scopes: `user` (default), `project`, `local`, `global`.
 `ccfg ls` includes the full description of each setting. Use `ccfg doc KEY`
 for its description, allowed values, default, scope, and example.
 
+## Recipe: route command output through RTK
+
+[RTK](https://github.com/rtk-ai/rtk) shortens the output of shell commands
+such as `grep`, `pnpm test`, and `bun test` before Claude Code reads it. It
+installs its own `PreToolUse` hook, so `ccfg` has no option for it. Two steps
+cover every command:
+
+```sh
+brew install rtk
+rtk init -g --auto-patch        # hook + ~/.claude/RTK.md, backs up settings.json
+rtk init --show                 # confirm the hook is listed
+```
+
+The hook rewrites `Bash` commands only. Claude Code's built-in `Read`, `Grep`,
+and `Glob` tools do not pass through it. To push searches into the shell, where
+the hook applies, turn `Grep` and `Glob` off in the **Tools** pane; this adds
+them to `permissions.deny` in the chosen file. Leave `Read` on: `Edit` needs a
+prior `Read` of the file and fails without it.
+
+Check it works after a session with `rtk gain`. Commands that must stay raw
+go in `exclude_commands` under `[hooks]` in rtk's `config.toml`
+(`~/Library/Application Support/rtk/config.toml` on macOS).
+
 ## Development
 
 Install the Git hooks after cloning (requires Node.js, npm, and Go):
