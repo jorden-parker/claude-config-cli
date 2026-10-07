@@ -123,6 +123,11 @@ func Open(scope Scope, cwd string) (*File, error) {
 	if err := json.Unmarshal(b, &f.Data); err != nil {
 		return f, fmt.Errorf("%s: %w", f.Path, err)
 	}
+	// JSON null decodes without error but leaves the map nil.
+	if f.Data == nil {
+		f.Data = map[string]any{}
+		return f, fmt.Errorf("%s: expected a JSON object", f.Path)
+	}
 	f.order = map[string][]string{}
 	_ = scanOrder(json.NewDecoder(bytes.NewReader(b)), "", f.order)
 	return f, nil

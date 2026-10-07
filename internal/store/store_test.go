@@ -136,3 +136,69 @@ func TestSaveKeepsKeyOrder(t *testing.T) {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+func writeProjectFile(t *testing.T, dir, content string) {
+	t.Helper()
+	p := filepath.Join(dir, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenRejectsInvalidDocuments(t *testing.T) {
+	for _, tc := range []struct{ name, doc string }{
+		{"null", "null"},
+		{"array", `[1, 2]`},
+		{"scalar", `42`},
+		{"malformed", `{"a":`},
+		{"trailing", `{"a": 1} x`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeProjectFile(t, dir, tc.doc)
+			f, err := Open(ScopeProject, dir)
+			if err == nil {
+				t.Fatalf("Open(%q) returned no error", tc.doc)
+			}
+			if !strings.Contains(err.Error(), f.Path) {
+				t.Fatalf("error %q does not name %s", err, f.Path)
+			}
+			if f.Data == nil {
+				t.Fatal("an error-bearing file must keep a non-nil map for display")
+			}
+		})
+	}
+}
+
+func TestOpenAcceptsEmptyDocuments(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write bool
+		doc   string
+	}{
+		{"missing", false, ""},
+		{"zero-byte", true, ""},
+		{"whitespace", true, " \n\t "},
+		{"empty-object", true, "{}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.write {
+				writeProjectFile(t, dir, tc.doc)
+			}
+			f, err := Open(ScopeProject, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if f.Data == nil {
+				t.Fatal("Data is nil")
+			}
+			if err := f.Set("theme", "dark"); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

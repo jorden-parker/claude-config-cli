@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -8,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jorden-parker/claude-config-cli/internal/store"
 )
 
 func selectKey(t *testing.T, m *model, key string) {
@@ -268,5 +271,165 @@ func TestSearchFindsNestedKeys(t *testing.T) {
 	}
 	if it, _ := m.selectedItem(); it.header {
 		t.Fatal("cursor on heading after search")
+	}
+}
+
+// breakFile replaces a scope's settings file with a document that fails to
+// load, then reloads the model so it holds the load error.
+func breakFile(t *testing.T, m *model, sc store.Scope, fixture string) string {
+	t.Helper()
+	p := store.Path(sc, m.cwd)
+	if err := os.RemoveAll(p); err != nil {
+		t.Fatal(err)
+	}
+	if fixture == "dir" {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(fixture), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.reload()
+	if m.errs[sc] == nil {
+		t.Fatalf("%s fixture %q loaded without an error", sc, fixture)
+	}
+	return p
+}
+
+// diskState captures a path's bytes, or the error from reading it.
+func diskState(p string) string {
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+func TestOrdinaryEditsRejectLoadErrors(t *testing.T) {
+	type target struct {
+		name  string
+		scope store.Scope
+		key   string
+	}
+	user := target{"user", store.ScopeUser, "effortLevel"}
+	global := target{"global", store.ScopeGlobal, "copyOnSelect"}
+	for _, fixture := range []string{`{"effortLevel": `, "null", "dir"} {
+		for _, tg := range []target{user, global} {
+			for _, action := range []string{"open", "cycle", "unset"} {
+				t.Run(tg.name+"/"+fixture+"/"+action, func(t *testing.T) {
+					t.Setenv("HOME", t.TempDir())
+					m := newModel(t.TempDir())
+					m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
+					selectKey(t, m, tg.key)
+					p := breakFile(t, m, tg.scope, fixture)
+					// The file shown is the one the selected setting writes to.
+					m.files[tg.scope].Data[tg.key] = "seeded"
+					disk, data := diskState(p), store.Format(m.files[tg.scope].Data)
+
+					switch action {
+					case "open":
+						m.startEdit()
+					case "cycle":
+						m.cycleValue()
+					case "unset":
+						m.doUnset()
+					}
+					if m.mode != modeBrowse || m.edit != nil {
+						t.Fatalf("mode = %v, edit open = %v", m.mode, m.edit != nil)
+					}
+					if !m.statusErr || !strings.Contains(m.status, "failed to load") {
+						t.Fatalf("status = %q (error %v)", m.status, m.statusErr)
+					}
+					if got := diskState(p); got != disk {
+						t.Fatalf("disk changed:\n%s\nwas:\n%s", got, disk)
+					}
+					if got := store.Format(m.files[tg.scope].Data); got != data {
+						t.Fatalf("model changed: %s, was %s", got, data)
+					}
+				})
+			}
+		}
+	}
+
+	// A form opened on a good file stays open while the file goes bad; the
+	// submit itself must refuse.
+	for _, fixture := range []string{`{"apiKeyHelper": `, "null", "dir"} {
+		t.Run("submit/"+fixture, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			m := newModel(t.TempDir())
+			m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
+			selectKey(t, m, "apiKeyHelper")
+			runEnvCommand(m, m.startEdit())
+			if m.mode != modeEdit {
+				t.Fatal("form did not open on a good file")
+			}
+			p := breakFile(t, m, store.ScopeUser, fixture)
+			m.files[store.ScopeUser].Data["apiKeyHelper"] = "seeded"
+			disk, data := diskState(p), store.Format(m.files[store.ScopeUser].Data)
+
+			m.Update(tea.PasteMsg{Content: "new-helper"})
+			_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			runEnvCommand(m, cmd)
+			if m.mode != modeBrowse || m.edit != nil {
+				t.Fatalf("form did not complete: mode = %v", m.mode)
+			}
+			if !m.statusErr || !strings.Contains(m.status, "failed to load") {
+				t.Fatalf("status = %q (error %v)", m.status, m.statusErr)
+			}
+			if got := diskState(p); got != disk {
+				t.Fatalf("disk changed:\n%s\nwas:\n%s", got, disk)
+			}
+			if got := store.Format(m.files[store.ScopeUser].Data); got != data {
+				t.Fatalf("model changed: %s, was %s", got, data)
+			}
+		})
+	}
+}
+
+func TestOrdinaryEditsResumeAfterReload(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := newModel(t.TempDir())
+	selectKey(t, m, "effortLevel")
+	p := breakFile(t, m, store.ScopeUser, `{"custom": `)
+	broken := diskState(p)
+
+	m.cycleValue()
+	if !m.statusErr || diskState(p) != broken {
+		t.Fatalf("broken file was not refused: status %q", m.status)
+	}
+	// Repairing the file on disk is not enough until the model reloads it.
+	if err := os.WriteFile(p, []byte(`{"custom": {"keep": 1}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.cycleValue()
+	if !m.statusErr || m.errs[store.ScopeUser] == nil {
+		t.Fatalf("load error cleared before reload: status %q", m.status)
+	}
+	if got := diskState(p); got != `{"custom": {"keep": 1}}` {
+		t.Fatalf("disk changed before reload: %s", got)
+	}
+
+	m.reload()
+	if m.errs[store.ScopeUser] != nil {
+		t.Fatalf("reload kept the error: %v", m.errs[store.ScopeUser])
+	}
+	m.cycleValue()
+	if m.statusErr {
+		t.Fatalf("edit after reload failed: %s", m.status)
+	}
+	f, err := store.Open(store.ScopeUser, m.cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := f.Get("effortLevel"); got != "low" {
+		t.Fatalf("effortLevel = %v", got)
+	}
+	if got, _ := f.Get("custom.keep"); got != 1.0 {
+		t.Fatalf("sibling key lost: custom.keep = %v", got)
 	}
 }

@@ -235,6 +235,21 @@ func (m *model) selected() *schema.Setting {
 	return nil
 }
 
+// editableFile returns a scope's file for editing. It refuses, with a status
+// message, a file that failed to load, so an edit cannot replace its contents.
+func (m *model) editableFile(sc store.Scope) (*store.File, bool) {
+	if err := m.errs[sc]; err != nil {
+		m.setStatus("Can't edit a settings file that failed to load: "+err.Error(), true)
+		return nil, false
+	}
+	f := m.files[sc]
+	if f == nil {
+		m.setStatus("Can't edit a settings file that isn't loaded.", true)
+		return nil, false
+	}
+	return f, true
+}
+
 func (m *model) targetScope(st *schema.Setting) store.Scope {
 	if st != nil && st.Global {
 		return store.ScopeGlobal
@@ -515,8 +530,10 @@ func (m *model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if isEnv(st) {
 			return m, m.saveEnv(st, v, false)
 		}
-		sc := m.targetScope(st)
-		f := m.files[sc]
+		f, ok := m.editableFile(m.targetScope(st))
+		if !ok {
+			return m, nil
+		}
 		if err := f.Set(st.Key, v); err != nil {
 			m.setStatus(err.Error(), true)
 			return m, nil
@@ -550,7 +567,11 @@ func (m *model) startEdit() tea.Cmd {
 		m.setStatus(notReadHere(st, sc), true)
 		return nil
 	}
-	cur, _ := m.files[sc].Get(st.Key)
+	f, ok := m.editableFile(sc)
+	if !ok {
+		return nil
+	}
+	cur, _ := f.Get(st.Key)
 	m.edit = newEdit(st, cur, m.sch, max(1, m.dialogWidth()-4), max(1, m.height-editChrome), m.isDark)
 	m.mode = modeEdit
 	return m.edit.form.Init()
@@ -593,7 +614,10 @@ func (m *model) cycleValue() tea.Cmd {
 		m.setStatus(notReadHere(st, sc), true)
 		return nil
 	}
-	f := m.files[sc]
+	f, ok := m.editableFile(sc)
+	if !ok {
+		return nil
+	}
 	next := opts[0]
 	if cur, ok := f.Get(st.Key); ok {
 		for i, o := range opts {
@@ -631,7 +655,10 @@ func (m *model) doUnset() tea.Cmd {
 	if isEnv(st) {
 		return m.saveEnv(st, nil, true)
 	}
-	f := m.files[m.targetScope(st)]
+	f, ok := m.editableFile(m.targetScope(st))
+	if !ok {
+		return nil
+	}
 	f.Unset(st.Key)
 	if err := f.Save(); err != nil {
 		m.setStatus("Save failed: "+err.Error(), true)
