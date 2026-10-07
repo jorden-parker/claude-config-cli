@@ -78,7 +78,11 @@ func toolName(st *schema.Setting) string {
 }
 
 func toolRules(f *store.File) ([]string, error) {
-	v, ok := f.Get("permissions.deny")
+	return permissionRules(f, "permissions.deny")
+}
+
+func permissionRules(f *store.File, key string) ([]string, error) {
+	v, ok := f.Get(key)
 	if !ok {
 		return nil, nil
 	}
@@ -90,13 +94,13 @@ func toolRules(f *store.File) ([]string, error) {
 		for i, rule := range rules {
 			s, ok := rule.(string)
 			if !ok {
-				return nil, fmt.Errorf("permissions.deny must contain only strings")
+				return nil, fmt.Errorf("%s must contain only strings", key)
 			}
 			out[i] = s
 		}
 		return out, nil
 	default:
-		return nil, fmt.Errorf("permissions.deny must be an array of strings")
+		return nil, fmt.Errorf("%s must be an array of strings", key)
 	}
 }
 
@@ -151,9 +155,26 @@ func (m *model) toggleTool(st *schema.Setting) tea.Cmd {
 		}
 	}
 	state := "on"
+	var allow []string
+	allowed := false
 	if !disabled {
 		next = append(next, name)
 		state = "off"
+		// A denied tool must not stay allowed in the same file.
+		allowRules, err := permissionRules(f, "permissions.allow")
+		if err != nil {
+			m.setStatus(err.Error(), true)
+			return nil
+		}
+		allow = make([]string, 0, len(allowRules))
+		for _, rule := range allowRules {
+			// Name(*) allows the whole tool, same as the bare name.
+			if rule == name || rule == name+"(*)" {
+				allowed = true
+			} else {
+				allow = append(allow, rule)
+			}
+		}
 	}
 	// Work on a copy so a failed save does not change the displayed state.
 	var data map[string]any
@@ -167,12 +188,22 @@ func (m *model) toggleTool(st *schema.Setting) tea.Cmd {
 		m.setStatus(err.Error(), true)
 		return nil
 	}
+	if allowed {
+		if err := updated.Set("permissions.allow", allow); err != nil {
+			m.setStatus(err.Error(), true)
+			return nil
+		}
+	}
 	if err := updated.Save(); err != nil {
 		m.setStatus("Save failed: "+err.Error(), true)
 		return nil
 	}
 	m.files[sc] = &updated
-	m.setStatus(fmt.Sprintf("Turned %s %s in %s", name, state, tildify(f.Path)), false)
+	msg := fmt.Sprintf("Turned %s %s in %s", name, state, tildify(f.Path))
+	if allowed {
+		msg += " and removed it from permissions.allow"
+	}
+	m.setStatus(msg, false)
 	return m.afterWrite()
 }
 
@@ -213,7 +244,7 @@ func (m *model) toolDoc(st *schema.Setting, w int) string {
 	}
 	wrap := lipgloss.NewStyle().Width(w)
 	b.WriteString("\n" + wrap.Render(fmt.Sprintf("Press tab or enter to turn %s on or off in the target file.", name)) + "\n\n")
-	b.WriteString(s.subtle.Render(wrap.Render(fmt.Sprintf("Turning it off adds %q to permissions.deny. Turning it on removes that entry; the usual permission prompts still apply. Narrower rules such as %s(…) stay as they are. Whether a tool exists also depends on your Claude Code version.", name, name))) + "\n\n")
+	b.WriteString(s.subtle.Render(wrap.Render(fmt.Sprintf("Turning it off adds %q to permissions.deny and removes it and %s(*) from permissions.allow in the same file. Turning it on removes that entry; the usual permission prompts still apply. Narrower rules such as %s(…) stay as they are. Whether a tool exists also depends on your Claude Code version.", name, name, name))) + "\n\n")
 	b.WriteString(s.accent.Render("https://code.claude.com/docs/en/tools-reference") + "\n")
 	return b.String()
 }

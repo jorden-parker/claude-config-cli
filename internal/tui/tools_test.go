@@ -105,6 +105,51 @@ func TestToolToggleRejectsInvalidRulesAndSaveFailures(t *testing.T) {
 	}
 }
 
+func TestToolDisableRemovesAllowRule(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cwd := t.TempDir()
+	m := newModel(cwd)
+	f := m.files[store.ScopeUser]
+	f.Set("permissions.allow", []any{"Read", "NotebookEdit", "NotebookEdit(notes.ipynb)", "NotebookEdit(*)", "NotebookEdit"})
+	selectKey(t, m, "NotebookEdit")
+	for _, disabled := range []bool{true, false} {
+		pressTab(m)
+		if m.statusErr {
+			t.Fatal(m.status)
+		}
+		saved, err := store.Open(store.ScopeUser, cwd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		allow, err := permissionRules(saved, "permissions.allow")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{"Read", "NotebookEdit(notes.ipynb)"}; !reflect.DeepEqual(allow, want) {
+			t.Fatalf("disabled=%v: allow = %v, want %v", disabled, allow, want)
+		}
+		if denies(saved, "NotebookEdit") != disabled {
+			t.Fatalf("disabled=%v: deny rule wrong", disabled)
+		}
+	}
+}
+
+func TestToolDisableRejectsInvalidAllowRules(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := newModel(t.TempDir())
+	f := m.files[store.ScopeUser]
+	f.Set("permissions.allow", []any{42})
+	before := store.Format(f.Data)
+	selectKey(t, m, "NotebookEdit")
+	pressTab(m)
+	if !m.statusErr {
+		t.Fatal("expected error")
+	}
+	if got := store.Format(m.files[store.ScopeUser].Data); got != before {
+		t.Fatalf("failed toggle changed data: %s", got)
+	}
+}
+
 type storeError struct{}
 
 func (*storeError) Error() string { return "unreadable file" }

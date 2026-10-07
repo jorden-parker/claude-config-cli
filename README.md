@@ -99,8 +99,9 @@ At 100 columns and wider, documentation sits beside the settings. Smaller
 terminals show a wider setting list; press `ctrl+d` to read details. Below
 60 columns, sections and settings share one pane; use `←` and `enter` to switch.
 
-Disabling adds the tool's bare name to `permissions.deny`; enabling removes that
-exact entry. Normal permission prompts, scoped rules, and denies in other files
+Disabling adds the tool's bare name to `permissions.deny` and removes it (and
+`Tool(*)`) from `permissions.allow` in the same file; enabling removes that exact deny entry
+and does not restore the allow rule. Normal permission prompts, scoped rules, and denies in other files
 still apply. Tool availability depends on your Claude Code version and session;
 the catalogue comes from the [tools reference](https://code.claude.com/docs/en/tools-reference).
 Reload and save messages appear above the keyboard-help footer, which stays visible.
