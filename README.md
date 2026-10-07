@@ -168,6 +168,10 @@ user settings, `.claude/ccfg-statusline.json` for project settings, and
 fails, times out after 3 seconds, or prints nothing, it is left out and the
 rest still renders.
 
+Spaces at either end of the existing command's rows are trimmed where they meet
+your fields, so the separator is the only gap and the rows line up. Colours and
+the spacing inside a row are left alone.
+
 Editors per value kind:
 
 - **bool, enum**: a picker with each option's meaning from the docs

@@ -90,6 +90,28 @@ func TestComposePlacesExistingStatusLine(t *testing.T) {
 	}
 }
 
+func TestComposeTrimsPaddingFromExistingStatusLine(t *testing.T) {
+	input := []byte(`{"model":{"display_name":"Opus"}}`)
+	for _, tc := range []struct{ pos, existing, want string }{
+		{ExistingStart, "  a  \n", "a | Opus"},
+		{ExistingEnd, "  a  \n", "Opus | a"},
+		{ExistingAbove, " a\n", "a\nOpus"},
+		{ExistingBelow, " a\r\n", "Opus\na"},
+		// Padding inside colour codes goes; the codes stay.
+		{ExistingStart, "\x1b[38;5;214m a \x1b[0m", "\x1b[38;5;214ma\x1b[0m | Opus"},
+		{ExistingEnd, " \x1b[1m\x1b[31m a b\x1b[0m ", "Opus | \x1b[1m\x1b[31ma b\x1b[0m"},
+		// Rows with nothing to see are dropped.
+		{ExistingAbove, "a\n   \n\x1b[0m\nb", "a\nb\nOpus"},
+		{ExistingStart, " \x1b[0m \n", "Opus"},
+	} {
+		c := plain("model")
+		c.Existing = tc.pos
+		if got := Compose(c, input, tc.existing, now); got != tc.want {
+			t.Errorf("%s %q: got %q, want %q", tc.pos, tc.existing, got, tc.want)
+		}
+	}
+}
+
 func TestColorWrapsOnlyOwnFields(t *testing.T) {
 	c := plain("model")
 	c.Color = true

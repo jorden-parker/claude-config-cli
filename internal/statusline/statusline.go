@@ -11,9 +11,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jorden-parker/claude-config-cli/internal/store"
 )
@@ -163,7 +165,10 @@ func Compose(c *Config, input []byte, inherited string, now time.Time) string {
 	if own == "" {
 		return inherited
 	}
-	lines := strings.Split(inherited, "\n")
+	lines := tidy(inherited)
+	if len(lines) == 0 {
+		return own
+	}
 	switch c.Existing {
 	case ExistingEnd:
 		lines[0] = own + sep + lines[0]
@@ -175,6 +180,49 @@ func Compose(c *Config, input []byte, inherited string, now time.Time) string {
 		lines[len(lines)-1] += sep + own
 	}
 	return strings.Join(lines, "\n")
+}
+
+// escape matches a terminal escape code: a colour or a hyperlink.
+var escape = regexp.MustCompile("\x1b\\[[0-9;?]*[ -/]*[@-~]|\x1b\\][^\x07\x1b]*(?:\x07|\x1b\\\\)")
+
+// tidy splits the existing command's output into rows and takes the padding
+// off both ends of each one, so the separator is the only gap where a row
+// meets the fields and rows line up with them. Escape codes are kept, or a
+// colour left open would run into the fields. Rows with nothing to see go.
+func tidy(out string) []string {
+	var rows []string
+	for _, line := range strings.Split(out, "\n") {
+		// Text and escape codes alternate, text first.
+		var parts []string
+		pos := 0
+		for _, loc := range escape.FindAllStringIndex(line, -1) {
+			parts = append(parts, line[pos:loc[0]], line[loc[0]:loc[1]])
+			pos = loc[1]
+		}
+		parts = append(parts, line[pos:])
+		first, last := -1, -1
+		for i := 0; i < len(parts); i += 2 {
+			if strings.TrimSpace(parts[i]) == "" {
+				continue
+			}
+			if first < 0 {
+				first = i
+			}
+			last = i
+		}
+		if first < 0 {
+			continue
+		}
+		for i := 0; i < len(parts); i += 2 {
+			if i < first || i > last {
+				parts[i] = ""
+			}
+		}
+		parts[first] = strings.TrimLeftFunc(parts[first], unicode.IsSpace)
+		parts[last] = strings.TrimRightFunc(parts[last], unicode.IsSpace)
+		rows = append(rows, strings.Join(parts, ""))
+	}
+	return rows
 }
 
 func paint(on bool, color, s string) string {
