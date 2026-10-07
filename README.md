@@ -234,6 +234,41 @@ Check it works after a session with `rtk gain`. Commands that must stay raw
 go in `exclude_commands` under `[hooks]` in rtk's `config.toml`
 (`~/Library/Application Support/rtk/config.toml` on macOS).
 
+## Recipe: caveman mode and the generated status line
+
+The caveman hook and the status line script in `~/.claude` on this machine
+come from [claude-ui](https://github.com/jmep17/claude-ui), a separate local
+dashboard, not from `ccfg`. It vendors the `caveman` and `caveman-compress`
+skills from [caveman](https://github.com/JuliusBrussee/caveman) and installs
+them as a "setup piece": the two skills, a `SessionStart` hook at
+`~/.claude/hooks/caveman-activate.py` that prints the ruleset into every
+session, and the level file `~/.claude/.caveman-active`. Its status line
+piece writes `~/.claude/statusline.sh` and points `statusLine` at it.
+
+Install from the browser:
+
+```sh
+git clone https://github.com/jmep17/claude-ui.git
+claude-ui/bin/claude-ui          # opens http://localhost:7333
+```
+
+Then open the **Setup** tab and press **Apply** on _Caveman_ and _Claude Code
+statusline_. The same pieces apply from a terminal with no server running:
+
+```sh
+cd claude-ui/bin
+python3 -c "from claude_ui.setup import setup_apply; setup_apply('caveman')"
+python3 -c "from claude_ui.setup import setup_apply; setup_apply('statusline')"
+python3 -c "from claude_ui.setup import setup_state; print(setup_state())"   # verify
+```
+
+Both are idempotent and reversible with `setup_remove(...)`. Caveman appends
+one block to `hooks` in `settings.json` and removes only that block. Change
+the level by writing `lite`, `full`, `ultra`, or a `wenyan-*` value to
+`~/.claude/.caveman-active`; delete the file to turn it off. A status line
+installed this way shows up in `ccfg statusline` as the existing command and
+is kept when you turn `ccfg`'s fields on.
+
 ## Development
 
 Install the Git hooks after cloning (requires Node.js, npm, and Go):
