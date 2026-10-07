@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jorden-parker/claude-config-cli/internal/atomicfile"
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
 )
 
@@ -318,15 +319,12 @@ func (f *File) Save() error {
 	if f.Scope == ScopeManaged {
 		return errors.New("managed settings are read-only")
 	}
-	if err := os.MkdirAll(filepath.Dir(f.Path), 0o755); err != nil {
-		return err
-	}
 	var buf bytes.Buffer
 	if err := encode(&buf, f.Data, "", "", f.order); err != nil {
 		return err
 	}
 	b := append(buf.Bytes(), '\n')
-	if err := os.WriteFile(f.Path, b, 0o600); err != nil {
+	if err := atomicfile.Write(f.Path, b); err != nil {
 		return err
 	}
 	f.Exists = true

@@ -251,6 +251,15 @@ Existing destination files cause restore to stop before writing anything;
 left alone. Each file is restored separately; an I/O failure reports how many
 files were restored before the failure. Restart Claude Code after restoring.
 
+## How files are written
+
+ccfg saves settings and status-line files by writing a complete temporary file
+next to the target, then renaming it over the original. A failed write leaves
+the old file intact. Existing symlinks are followed and kept; dangling links
+and non-regular files (directories, pipes) are refused. Hard links and extended
+metadata (ACLs, xattrs) are not preserved. This does not prevent conflicting
+edits from other programs, and it does not make multi-file changes atomic.
+
 ## Recipe: caveman mode with hooks and the status line badge
 
 [caveman](https://github.com/JuliusBrussee/caveman) ships as a Claude Code

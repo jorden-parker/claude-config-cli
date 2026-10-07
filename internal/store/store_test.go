@@ -9,6 +9,52 @@ import (
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
 )
 
+func TestSaveAtomicIntegration(t *testing.T) {
+	dir := t.TempDir()
+
+	// New file: parents created, private mode.
+	f := &File{Scope: ScopeProject, Path: filepath.Join(dir, "new", "settings.json"), Data: map[string]any{"model": "opus"}}
+	if err := f.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if !f.Exists {
+		t.Fatal("Exists should be true after a successful save")
+	}
+	if fi, err := os.Stat(f.Path); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("new file mode: %v %v", fi, err)
+	}
+
+	// Existing file: mode kept, contents replaced.
+	if err := os.Chmod(f.Path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.Data["model"] = "sonnet"
+	if err := f.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(f.Path); fi.Mode().Perm() != 0o644 {
+		t.Fatalf("mode = %v", fi.Mode().Perm())
+	}
+	if got, _ := os.ReadFile(f.Path); string(got) != "{\n  \"model\": \"sonnet\"\n}\n" {
+		t.Fatalf("got %q", got)
+	}
+
+	// Invalid destination: error propagates and nothing is marked saved.
+	bad := &File{Scope: ScopeProject, Path: filepath.Join(dir, "isdir"), Data: map[string]any{}}
+	if err := os.Mkdir(bad.Path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := bad.Save(); err == nil {
+		t.Fatal("expected error saving over a directory")
+	}
+	if bad.Exists {
+		t.Fatal("Exists must stay false after a failed save")
+	}
+	if fi, err := os.Stat(bad.Path); err != nil || !fi.IsDir() {
+		t.Fatalf("directory was disturbed: %v %v", fi, err)
+	}
+}
+
 func TestRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	f, err := Open(ScopeProject, dir)

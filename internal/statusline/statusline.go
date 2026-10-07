@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/jorden-parker/claude-config-cli/internal/atomicfile"
 	"github.com/jorden-parker/claude-config-cli/internal/store"
 )
 
@@ -102,14 +103,11 @@ func Load(path string) (*Config, error) {
 
 // Save writes a config with two-space indentation.
 func Save(path string, c *Config) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(b, '\n'), 0o600)
+	return atomicfile.Write(path, append(b, '\n'))
 }
 
 // Has reports whether a field is shown.

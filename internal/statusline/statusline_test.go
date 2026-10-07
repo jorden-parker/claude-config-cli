@@ -306,6 +306,45 @@ func TestExistingFollowsOurOwnRenderer(t *testing.T) {
 	}
 }
 
+func TestSaveAtomicIntegration(t *testing.T) {
+	dir := t.TempDir()
+
+	path := filepath.Join(dir, "new", "c.json")
+	if err := Save(path, Default()); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("new file mode: %v %v", fi, err)
+	}
+
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := Default()
+	c.Toggle("model")
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o644 {
+		t.Fatalf("mode = %v", fi.Mode().Perm())
+	}
+	got, err := Load(path)
+	if err != nil || strings.Join(got.Fields, ",") != strings.Join(c.Fields, ",") {
+		t.Fatalf("loaded %+v, %v", got, err)
+	}
+
+	bad := filepath.Join(dir, "isdir")
+	if err := os.Mkdir(bad, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(bad, Default()); err == nil {
+		t.Fatal("expected error saving over a directory")
+	}
+	if fi, err := os.Stat(bad); err != nil || !fi.IsDir() {
+		t.Fatalf("directory was disturbed: %v %v", fi, err)
+	}
+}
+
 func TestConfigRoundTripAndOrdering(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "c.json")
 	c := Default()
