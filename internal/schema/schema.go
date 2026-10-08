@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/jorden-parker/claude-config-cli/internal/match"
 )
 
 //go:embed schema.json
@@ -143,17 +145,28 @@ func (s *Schema) BySection(section string) []*Setting {
 	return out
 }
 
-// Search returns settings whose key or description contains q (case-insensitive).
+// Search returns the settings that match q, best first: the key's last
+// segment, then the full key, section, and words in the description (see
+// package match). An empty q returns everything in documentation order.
 func (s *Schema) Search(q string) []*Setting {
-	q = strings.ToLower(strings.TrimSpace(q))
-	var out []*Setting
+	rows := make([]match.Fields, len(s.Settings))
 	for i := range s.Settings {
 		st := &s.Settings[i]
-		if q == "" || strings.Contains(strings.ToLower(st.Key), q) || strings.Contains(strings.ToLower(st.Desc), q) {
-			out = append(out, st)
-		}
+		rows[i] = match.Fields{Name: lastSegment(st.Key), Key: st.Key, Section: st.Section, Desc: st.Desc}
+	}
+	var out []*Setting
+	for _, h := range match.Rank(q, rows) {
+		out = append(out, &s.Settings[h.Index])
 	}
 	return out
+}
+
+// lastSegment is the part of a dotted key after the final dot.
+func lastSegment(key string) string {
+	if i := strings.LastIndex(key, "."); i >= 0 {
+		return key[i+1:]
+	}
+	return key
 }
 
 // Keys returns every current key, sorted.

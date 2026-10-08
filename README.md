@@ -65,7 +65,7 @@ ccfg -C ~/repo                  # another project
 | `shift+s`     | choose a target file with descriptions                              |
 | `ctrl+d`      | expand details (Esc returns)                                        |
 | `s`           | switch the target file: user, project, local                        |
-| `/`           | search every key and section (`esc` clears it)                      |
+| `/`           | search every key and section, best matches first (`esc` clears it)  |
 | `[` `]`       | open the previous or next section                                   |
 | `pgup` `pgdn` | scroll the details pane                                             |
 | `o`           | open the docs page for the key                                      |
@@ -83,8 +83,9 @@ toggle. Each row shows the value in effect and the file it comes
 from, with a description preview underneath. The details pane starts with
 **What it does**, explaining the selected setting, then lists the settings files from highest to lowest
 priority, shows which value wins, and marks the target file your edits go to.
-Search matches setting names, sections, and descriptions. In the edit form,
-`esc` cancels without saving.
+Search ranks matches on the setting name first, then the full key, the section,
+and words in the description. Terms under three letters skip descriptions.
+In the edit form, `esc` cancels without saving.
 
 Global-config keys (`~/.claude.json`) always write there, whatever the target.
 Managed settings are shown read-only.
@@ -197,7 +198,7 @@ Editors per value kind:
 
 ```sh
 ccfg ls                         # every key, grouped by section (alias of list)
-ccfg ls -q sandbox              # filter
+ccfg ls -q sandbox              # filter, best matches first
 ccfg ls sections
 ccfg doc permissions.defaultMode
 ccfg get model                  # value in every file

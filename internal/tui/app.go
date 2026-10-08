@@ -18,6 +18,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/jorden-parker/claude-config-cli/internal/match"
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
 	"github.com/jorden-parker/claude-config-cli/internal/statusline"
 	"github.com/jorden-parker/claude-config-cli/internal/store"
@@ -55,11 +56,20 @@ type item struct {
 	off     bool // tool is disabled by a deny rule in some file
 }
 
+// label is the text shown for the row: its short name, or the full key.
+func (i item) label() string {
+	if i.name != "" {
+		return i.name
+	}
+	return i.st.Key
+}
+
+// FilterValue packs the fields the search ranks; see rankFilter.
 func (i item) FilterValue() string {
 	if i.header {
 		return ""
 	}
-	return i.st.Key + " " + i.st.Section + " " + i.st.Desc
+	return match.Join(match.Fields{Name: i.label(), Key: i.st.Key, Section: i.st.Section, Desc: i.st.Desc})
 }
 
 type keymap struct {
@@ -147,7 +157,7 @@ func (m *model) newList(items []list.Item, singular, plural string) list.Model {
 	l.KeyMap.ShowFullHelp.SetEnabled(false)
 	l.KeyMap.CloseFullHelp.SetEnabled(false)
 	l.FilterInput.Prompt = "/ "
-	l.Filter = substringFilter
+	l.Filter = rankFilter
 	return l
 }
 
@@ -1103,21 +1113,18 @@ func (m *model) View() tea.View {
 	return v
 }
 
-// substringFilter matches keys and sections by plain case-insensitive substring,
-// which is more predictable than fuzzy matching across 227 similar names.
-func substringFilter(term string, targets []string) []list.Rank {
-	term = strings.ToLower(strings.TrimSpace(term))
-	var out []list.Rank
+// rankFilter puts exact and prefix matches on the shown name first, then key,
+// section, and word-prefix description hits, so short terms don't flood the
+// list. The matched indexes are rune positions in the shown name.
+func rankFilter(term string, targets []string) []list.Rank {
+	rows := make([]match.Fields, len(targets))
 	for i, t := range targets {
-		lt := strings.ToLower(t)
-		idx := strings.Index(lt, term)
-		if term == "" || idx >= 0 {
-			var matched []int
-			for j := idx; j >= 0 && j < idx+len(term); j++ {
-				matched = append(matched, j)
-			}
-			out = append(out, list.Rank{Index: i, MatchedIndexes: matched})
-		}
+		rows[i] = match.Split(t)
+	}
+	hits := match.Rank(term, rows)
+	out := make([]list.Rank, len(hits))
+	for i, h := range hits {
+		out[i] = list.Rank{Index: h.Index, MatchedIndexes: h.Name}
 	}
 	return out
 }

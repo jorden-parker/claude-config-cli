@@ -5,12 +5,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/fang"
 	"github.com/spf13/cobra"
 
+	"github.com/jorden-parker/claude-config-cli/internal/match"
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
 	"github.com/jorden-parker/claude-config-cli/internal/statusline"
 	"github.com/jorden-parker/claude-config-cli/internal/store"
@@ -96,6 +96,10 @@ func listCmd() *cobra.Command {
 			cur := ""
 			for _, st := range items {
 				if !showAll && st.Deprecated != "" {
+					continue
+				}
+				if search != "" {
+					fmt.Printf("  %s (%s) · %s\n    %s\n\n", st.Key, st.Kind, st.Section, strings.ReplaceAll(st.Desc, "\n", "\n    "))
 					continue
 				}
 				if st.Section != cur {
@@ -298,14 +302,13 @@ func envCmd() *cobra.Command {
 		Short: "List the environment variables Claude Code reads (for the env setting)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s := schema.Load()
-			q := ""
-			if len(args) > 0 {
-				q = strings.ToLower(args[0])
+			q := strings.Join(args, " ")
+			rows := make([]match.Fields, len(s.EnvVars))
+			for i, e := range s.EnvVars {
+				rows[i] = match.Fields{Name: e.Name, Key: e.Name, Desc: e.Purpose}
 			}
-			for _, e := range s.EnvVars {
-				if q != "" && !strings.Contains(strings.ToLower(e.Name), q) && !strings.Contains(strings.ToLower(e.Purpose), q) {
-					continue
-				}
+			for _, h := range match.Rank(q, rows) {
+				e := s.EnvVars[h.Index]
 				fmt.Printf("%-50s %s\n", e.Name, truncate(e.Purpose, 110))
 			}
 			return nil
@@ -344,16 +347,23 @@ func pickScope(st *schema.Setting) (store.Scope, error) {
 	return store.ParseScope(flagScope)
 }
 
+// maxSuggestions caps the "Did you mean" list for an unknown key.
+const maxSuggestions = 8
+
 func unknownKey(key string) error {
 	s := schema.Load()
-	var near []string
-	lk := strings.ToLower(key)
-	for _, k := range s.Keys() {
-		if strings.Contains(strings.ToLower(k), lk) {
-			near = append(near, k)
-		}
+	keys := s.Keys()
+	rows := make([]match.Fields, len(keys))
+	for i, k := range keys {
+		rows[i] = match.Fields{Name: k[strings.LastIndex(k, ".")+1:], Key: k}
 	}
-	sort.Strings(near)
+	var near []string
+	for _, h := range match.Rank(key, rows) {
+		if len(near) == maxSuggestions {
+			break
+		}
+		near = append(near, keys[h.Index])
+	}
 	if len(near) > 0 {
 		return fmt.Errorf("unknown setting %q. Did you mean: %s", key, strings.Join(near, ", "))
 	}

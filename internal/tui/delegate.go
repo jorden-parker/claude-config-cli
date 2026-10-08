@@ -62,23 +62,17 @@ func (d rowDelegate) Render(w io.Writer, lm list.Model, index int, li list.Item)
 		right = s.subtle.Render("default")
 	}
 
-	name := it.name
-	if name == "" {
-		name = it.st.Key
-	}
+	name := it.label()
 	room := max(4, width-2-lipgloss.Width(right)-1)
 	name = ansi.Truncate(name, room, "…")
 	unmatched := keyStyle
 	matched := keyStyle.Underline(true).Foreground(s.p.accent)
-	// Filter matches index into the full key; shift them onto the shown name.
-	offset := len([]rune(it.st.Key)) - len([]rune(it.name))
-	if it.name == "" {
-		offset = 0
-	}
+	// Filter matches are rune positions in the shown name; drop any cut off
+	// by the truncation.
 	var idx []int
 	for _, i := range lm.MatchesForItem(index) {
-		if j := i - offset; j >= 0 && j < len([]rune(name)) {
-			idx = append(idx, j)
+		if i >= 0 && i < len([]rune(name)) {
+			idx = append(idx, i)
 		}
 	}
 	keyView := keyStyle.Render(name)

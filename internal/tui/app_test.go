@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -432,4 +433,67 @@ func TestOrdinaryEditsResumeAfterReload(t *testing.T) {
 	if got, _ := f.Get("custom.keep"); got != 1.0 {
 		t.Fatalf("sibling key lost: custom.keep = %v", got)
 	}
+}
+
+// searchTargets starts a search and returns the list's filter values.
+func searchTargets(t *testing.T, m *model) []string {
+	t.Helper()
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	if !m.searching {
+		t.Fatal("/ did not start a search")
+	}
+	var targets []string
+	for _, li := range m.list.Items() {
+		targets = append(targets, li.FilterValue())
+	}
+	return targets
+}
+
+func TestSearchRanksNameHitsFirst(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := newModel(t.TempDir())
+	targets := searchTargets(t, m)
+	items := m.list.Items()
+
+	ranks := rankFilter("sandbox", targets)
+	if len(ranks) == 0 {
+		t.Fatal("no results for sandbox")
+	}
+	seenOther := false
+	for _, r := range ranks {
+		key := strings.ToLower(items[r.Index].(item).st.Key)
+		if !strings.Contains(key, "sandbox") {
+			seenOther = true
+		} else if seenOther {
+			t.Fatalf("%s ranked after a description-only hit", key)
+		}
+	}
+	if !seenOther {
+		t.Fatal("expected at least one description hit after the sandbox keys")
+	}
+
+	for _, r := range rankFilter("on", targets) {
+		it := items[r.Index].(item)
+		text := strings.ToLower(it.label() + " " + it.st.Key)
+		if !strings.Contains(text, "on") {
+			t.Fatalf("%s matched \"on\" only by description", it.st.Key)
+		}
+	}
+}
+
+func TestSearchHighlightsShownName(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := newModel(t.TempDir())
+	targets := searchTargets(t, m)
+	items := m.list.Items()
+	for _, r := range rankFilter("sep", targets) {
+		if it := items[r.Index].(item); it.name == "Separator" {
+			if got, want := r.MatchedIndexes, []int{0, 1, 2}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("Separator matches = %v, want %v", got, want)
+			}
+			return
+		}
+	}
+	t.Fatal("Separator row not found for sep")
 }
