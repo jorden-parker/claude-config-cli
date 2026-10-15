@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/fang"
 	"github.com/spf13/cobra"
 
 	"github.com/jorden-parker/claude-config-cli/internal/match"
+	"github.com/jorden-parker/claude-config-cli/internal/perm"
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
 	"github.com/jorden-parker/claude-config-cli/internal/statusline"
 	"github.com/jorden-parker/claude-config-cli/internal/store"
@@ -19,9 +21,12 @@ import (
 )
 
 var (
-	flagScope string
-	flagDir   string
-	name      = "claude-config-cli"
+	flagScope   string
+	flagDir     string
+	flagNoCache bool
+	name        = "claude-config-cli"
+	// now is the clock; tests move it to check the staleness note.
+	now = time.Now
 )
 
 // Main runs the command under the given program name and exits non-zero on
@@ -59,14 +64,21 @@ settings reference: https://code.claude.com/docs/en/settings-reference
 Run with no arguments to open the interactive editor.
 Pull up a terminal. Let's tinker.`,
 		SilenceUsage: true,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			schema.SetCacheEnabled(!flagNoCache)
+		},
+		PersistentPostRun: func(cmd *cobra.Command, args []string) {
+			catalogueNotes(cmd)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return tui.Run(cwd())
 		},
 	}
 	root.PersistentFlags().StringVarP(&flagDir, "dir", "C", "", "project directory (default: current directory)")
+	root.PersistentFlags().BoolVar(&flagNoCache, "no-cache", false, "ignore the catalogue saved by sync; use the one built in")
 
 	statusline.Program = name
-	root.AddCommand(listCmd(), getCmd(), setCmd(), unsetCmd(), docCmd(), showCmd(), envCmd(), pathsCmd(), statuslineCmd(), snapshotCmd(), restoreCmd())
+	root.AddCommand(listCmd(), getCmd(), setCmd(), unsetCmd(), docCmd(), showCmd(), envCmd(), pathsCmd(), statuslineCmd(), snapshotCmd(), restoreCmd(), syncCmd(), checkCmd())
 	return root
 }
 
@@ -202,13 +214,23 @@ func setCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := f.Set(key, v); err != nil {
+			var removed map[string][]string
+			if rules, ok := v.([]string); ok && perm.IsList(key) {
+				removed, err = perm.Reconcile(f, key, rules)
+				v, _ = f.Get(key)
+			} else {
+				err = f.Set(key, v)
+			}
+			if err != nil {
 				return err
 			}
 			if err := f.Save(); err != nil {
 				return err
 			}
 			fmt.Printf("%s = %s  →  %s\n", key, store.Format(v), f.Path)
+			if note := perm.Describe(removed); note != "" {
+				fmt.Printf("%s so no rule contradicts %s\n", note, key)
+			}
 			if st.Deprecated != "" {
 				fmt.Printf("note: %s\n", st.Deprecated)
 			}
@@ -333,6 +355,16 @@ func pathsCmd() *cobra.Command {
 				}
 				fmt.Printf("%-8s %-10s %s\n", sc, state, f.Path)
 			}
+			// The catalogue "sync" saves; Load prefers it over the built-in copy.
+			state := "missing"
+			path, _ := schema.CachePath()
+			if s, err := os.ReadFile(path); err == nil {
+				state = "unreadable"
+				if c, err := schema.Parse(s); err == nil {
+					state = fmt.Sprintf("%d keys, %s", len(c.Settings), c.GeneratedOn)
+				}
+			}
+			fmt.Printf("%-8s %-10s %s\n", "catalogue", state, path)
 		},
 	}
 }

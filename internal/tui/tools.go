@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/jorden-parker/claude-config-cli/internal/perm"
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
 	"github.com/jorden-parker/claude-config-cli/internal/store"
 )
@@ -68,6 +69,15 @@ var toolSettings = func() []schema.Setting {
 	return out
 }()
 
+// ToolNames lists the tools the Tools pane can turn off, in display order.
+func ToolNames() []string {
+	out := make([]string, len(toolSettings))
+	for i := range toolSettings {
+		out[i] = toolSettings[i].Key
+	}
+	return out
+}
+
 func toolName(st *schema.Setting) string {
 	for i := range toolSettings {
 		if st == &toolSettings[i] {
@@ -78,30 +88,7 @@ func toolName(st *schema.Setting) string {
 }
 
 func toolRules(f *store.File) ([]string, error) {
-	return permissionRules(f, "permissions.deny")
-}
-
-func permissionRules(f *store.File, key string) ([]string, error) {
-	v, ok := f.Get(key)
-	if !ok {
-		return nil, nil
-	}
-	switch rules := v.(type) {
-	case []string:
-		return rules, nil
-	case []any:
-		out := make([]string, len(rules))
-		for i, rule := range rules {
-			s, ok := rule.(string)
-			if !ok {
-				return nil, fmt.Errorf("%s must contain only strings", key)
-			}
-			out[i] = s
-		}
-		return out, nil
-	default:
-		return nil, fmt.Errorf("%s must be an array of strings", key)
-	}
+	return perm.Rules(f, perm.Deny)
 }
 
 // toolDeniedIn returns the highest-precedence file whose permissions.deny
@@ -155,26 +142,9 @@ func (m *model) toggleTool(st *schema.Setting) tea.Cmd {
 		}
 	}
 	state := "on"
-	var allow []string
-	allowed := false
 	if !disabled {
 		next = append(next, name)
 		state = "off"
-		// A denied tool must not stay allowed in the same file.
-		allowRules, err := permissionRules(f, "permissions.allow")
-		if err != nil {
-			m.setStatus(err.Error(), true)
-			return nil
-		}
-		allow = make([]string, 0, len(allowRules))
-		for _, rule := range allowRules {
-			// Name(*) allows the whole tool, same as the bare name.
-			if rule == name || rule == name+"(*)" {
-				allowed = true
-			} else {
-				allow = append(allow, rule)
-			}
-		}
 	}
 	// Work on a copy so a failed save does not change the displayed state.
 	var data map[string]any
@@ -184,15 +154,12 @@ func (m *model) toggleTool(st *schema.Setting) tea.Cmd {
 	}
 	updated := *f
 	updated.Data = data
-	if err := updated.Set("permissions.deny", next); err != nil {
+	// Denying the whole tool also drops its allow and ask rules, which could
+	// never match again.
+	removed, err := perm.Reconcile(&updated, perm.Deny, next)
+	if err != nil {
 		m.setStatus(err.Error(), true)
 		return nil
-	}
-	if allowed {
-		if err := updated.Set("permissions.allow", allow); err != nil {
-			m.setStatus(err.Error(), true)
-			return nil
-		}
 	}
 	if err := updated.Save(); err != nil {
 		m.setStatus("Save failed: "+err.Error(), true)
@@ -200,8 +167,8 @@ func (m *model) toggleTool(st *schema.Setting) tea.Cmd {
 	}
 	m.files[sc] = &updated
 	msg := fmt.Sprintf("Turned %s %s in %s", name, state, tildify(f.Path))
-	if allowed {
-		msg += " and removed it from permissions.allow"
+	if note := perm.Describe(removed); note != "" {
+		msg += "; " + note
 	}
 	m.setStatus(msg, false)
 	return m.afterWrite()
@@ -244,7 +211,7 @@ func (m *model) toolDoc(st *schema.Setting, w int) string {
 	}
 	wrap := lipgloss.NewStyle().Width(w)
 	b.WriteString("\n" + wrap.Render(fmt.Sprintf("Press tab or enter to turn %s on or off in the target file.", name)) + "\n\n")
-	b.WriteString(s.subtle.Render(wrap.Render(fmt.Sprintf("Turning it off adds %q to permissions.deny and removes it and %s(*) from permissions.allow in the same file. Turning it on removes that entry; the usual permission prompts still apply. Narrower rules such as %s(…) stay as they are. Whether a tool exists also depends on your Claude Code version.", name, name, name))) + "\n\n")
+	b.WriteString(s.subtle.Render(wrap.Render(fmt.Sprintf("Turning it off adds %q to permissions.deny and removes every %s rule from permissions.allow and permissions.ask in the same file, because a denied tool can't match them. Turning it on removes that entry; the usual permission prompts still apply. Whether a tool exists also depends on your Claude Code version.", name, name))) + "\n\n")
 	b.WriteString(s.accent.Render("https://code.claude.com/docs/en/tools-reference") + "\n")
 	return b.String()
 }

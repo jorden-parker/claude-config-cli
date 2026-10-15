@@ -6,15 +6,24 @@ package schema
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jorden-parker/claude-config-cli/internal/match"
 )
 
+// Regenerate the embedded catalogue from the live docs (needs the network):
+//
+//go:generate go run ../../cmd/ccfg sync --embed --out schema.json
 //go:embed schema.json
 var raw []byte
+
+// CurrentFormat is the catalogue layout this build understands. A cached
+// catalogue with another format is ignored in favour of the embedded one.
+const CurrentFormat = 1
 
 // Kind describes how a setting is edited and validated.
 type Kind string
@@ -41,6 +50,7 @@ const (
 	ScopeManaged          ScopeClass = "managed"
 	ScopeUserManaged      ScopeClass = "user-managed"
 	ScopeUserLocalManaged ScopeClass = "user-local-managed"
+	ScopeUser             ScopeClass = "user"
 	ScopeGlobal           ScopeClass = "global"
 )
 
@@ -73,6 +83,9 @@ type EnvVar struct {
 
 // Schema is the whole catalogue.
 type Schema struct {
+	// Format is CurrentFormat for catalogues this build can read. The embedded
+	// catalogue may predate the field, in which case it is zero.
+	Format        int       `json:"format,omitempty"`
 	GeneratedFrom string    `json:"generatedFrom"`
 	GeneratedOn   string    `json:"generatedOn"`
 	Settings      []Setting `json:"settings"`
@@ -92,40 +105,59 @@ type Schema struct {
 var (
 	once   sync.Once
 	loaded *Schema
+	origin Origin
 )
 
-// Load parses the embedded schema once and returns it.
+// Load returns the catalogue, parsed once: the cached copy written by
+// "sync" when it is valid, otherwise the embedded one. Source says which.
 func Load() *Schema {
 	once.Do(func() {
-		s := &Schema{}
-		if err := json.Unmarshal(raw, s); err != nil {
-			panic("schema: embedded schema.json is invalid: " + err.Error())
+		path := ""
+		if cacheEnabled {
+			path, _ = CachePath()
 		}
-		all := s.Settings
-		s.Settings = make([]Setting, 0, len(all))
-		for _, st := range all {
-			if st.Removed {
-				s.removed = append(s.removed, st)
-			} else {
-				s.Settings = append(s.Settings, st)
-			}
-		}
-		s.byKey = make(map[string]*Setting, len(all))
-		for i := range s.removed {
-			s.byKey[s.removed[i].Key] = &s.removed[i]
-		}
-		seen := map[string]bool{}
-		for i := range s.Settings {
-			st := &s.Settings[i]
-			s.byKey[st.Key] = st
-			if !seen[st.Section] {
-				seen[st.Section] = true
-				s.sections = append(s.sections, st.Section)
-			}
-		}
-		loaded = s
+		loaded, origin = load(path, raw, time.Now())
 	})
 	return loaded
+}
+
+// Loaded reports whether Load has run, so a caller can report staleness
+// without forcing a parse.
+func Loaded() bool { return loaded != nil }
+
+// Parse decodes a catalogue and builds its indexes. Entries marked removed
+// are kept out of Settings but still found by Get.
+func Parse(b []byte) (*Schema, error) {
+	s := &Schema{}
+	if err := json.Unmarshal(b, s); err != nil {
+		return nil, err
+	}
+	if len(s.Settings) == 0 {
+		return nil, errors.New("catalogue lists no settings")
+	}
+	all := s.Settings
+	s.Settings = make([]Setting, 0, len(all))
+	for _, st := range all {
+		if st.Removed {
+			s.removed = append(s.removed, st)
+		} else {
+			s.Settings = append(s.Settings, st)
+		}
+	}
+	s.byKey = make(map[string]*Setting, len(all))
+	for i := range s.removed {
+		s.byKey[s.removed[i].Key] = &s.removed[i]
+	}
+	seen := map[string]bool{}
+	for i := range s.Settings {
+		st := &s.Settings[i]
+		s.byKey[st.Key] = st
+		if !seen[st.Section] {
+			seen[st.Section] = true
+			s.sections = append(s.sections, st.Section)
+		}
+	}
+	return s, nil
 }
 
 // Get returns the setting for key, or nil.

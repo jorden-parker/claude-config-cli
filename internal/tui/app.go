@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
@@ -19,6 +20,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jorden-parker/claude-config-cli/internal/match"
+	"github.com/jorden-parker/claude-config-cli/internal/perm"
 	"github.com/jorden-parker/claude-config-cli/internal/schema"
 	"github.com/jorden-parker/claude-config-cli/internal/statusline"
 	"github.com/jorden-parker/claude-config-cli/internal/store"
@@ -94,6 +96,7 @@ var keys = keymap{
 type model struct {
 	cwd    string
 	sch    *schema.Schema
+	stale  bool // the catalogue is older than schema.StaleAfter
 	files  map[store.Scope]*store.File
 	errs   map[store.Scope]error
 	scope  store.Scope
@@ -132,6 +135,7 @@ func Run(cwd string) error {
 
 func newModel(cwd string) *model {
 	m := &model{cwd: cwd, sch: schema.Load(), scope: store.ScopeUser, isDark: true}
+	m.stale = m.sch.Stale(time.Now())
 	m.st = newStyles(true)
 	m.reload()
 	m.sections = append([]string(nil), m.sch.Sections()...)
@@ -541,18 +545,36 @@ func (m *model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
-		if err := f.Set(st.Key, v); err != nil {
-			m.setStatus(err.Error(), true)
-			return m, nil
-		}
-		if err := f.Save(); err != nil {
-			m.setStatus("Save failed: "+err.Error(), true)
-			return m, nil
-		}
-		m.setStatus(fmt.Sprintf("Saved %s = %s in %s", st.Key, short(store.Format(v), 40), tildify(f.Path)), false)
-		return m, m.afterWrite()
+		return m, m.saveValue(st, f, v)
 	}
 	return m, cmd
+}
+
+// saveValue stores v under st.Key in f and saves. A permission rule list
+// also drops the rules in the other two lists that would contradict it.
+func (m *model) saveValue(st *schema.Setting, f *store.File, v any) tea.Cmd {
+	var removed map[string][]string
+	var err error
+	if rules, ok := v.([]string); ok && perm.IsList(st.Key) {
+		removed, err = perm.Reconcile(f, st.Key, rules)
+		v, _ = f.Get(st.Key)
+	} else {
+		err = f.Set(st.Key, v)
+	}
+	if err != nil {
+		m.setStatus(err.Error(), true)
+		return nil
+	}
+	if err := f.Save(); err != nil {
+		m.setStatus("Save failed: "+err.Error(), true)
+		return nil
+	}
+	msg := fmt.Sprintf("Saved %s = %s in %s", st.Key, short(store.Format(v), 40), tildify(f.Path))
+	if note := perm.Describe(removed); note != "" {
+		msg += "; " + note
+	}
+	m.setStatus(msg, false)
+	return m.afterWrite()
 }
 
 func (m *model) startEdit() tea.Cmd {

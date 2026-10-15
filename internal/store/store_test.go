@@ -248,3 +248,12 @@ func TestOpenAcceptsEmptyDocuments(t *testing.T) {
 		})
 	}
 }
+
+func TestAllowedUserScopeClass(t *testing.T) {
+	st := &schema.Setting{Key: "worktree.location", ScopeClass: schema.ScopeUser}
+	for sc, want := range map[Scope]bool{ScopeUser: true, ScopeProject: false, ScopeLocal: false, ScopeGlobal: false, ScopeManaged: false} {
+		if got := Allowed(st, sc); got != want {
+			t.Errorf("Allowed(user class, %s) = %v", sc, got)
+		}
+	}
+}

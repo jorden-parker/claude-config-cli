@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jorden-parker/claude-config-cli/internal/perm"
 	"github.com/jorden-parker/claude-config-cli/internal/store"
 )
 
@@ -105,12 +106,13 @@ func TestToolToggleRejectsInvalidRulesAndSaveFailures(t *testing.T) {
 	}
 }
 
-func TestToolDisableRemovesAllowRule(t *testing.T) {
+func TestToolDisableRemovesAllowAndAskRules(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	cwd := t.TempDir()
 	m := newModel(cwd)
 	f := m.files[store.ScopeUser]
 	f.Set("permissions.allow", []any{"Read", "NotebookEdit", "NotebookEdit(notes.ipynb)", "NotebookEdit(*)", "NotebookEdit"})
+	f.Set("permissions.ask", []any{"NotebookEdit(secret.ipynb)", "Bash(rm *)"})
 	selectKey(t, m, "NotebookEdit")
 	for _, disabled := range []bool{true, false} {
 		pressTab(m)
@@ -121,15 +123,23 @@ func TestToolDisableRemovesAllowRule(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		allow, err := permissionRules(saved, "permissions.allow")
+		allow, err := perm.Rules(saved, perm.Allow)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := []string{"Read", "NotebookEdit(notes.ipynb)"}; !reflect.DeepEqual(allow, want) {
+		// Every NotebookEdit rule goes: a denied tool can't match any of them.
+		if want := []string{"Read"}; !reflect.DeepEqual(allow, want) {
 			t.Fatalf("disabled=%v: allow = %v, want %v", disabled, allow, want)
+		}
+		ask, _ := perm.Rules(saved, perm.Ask)
+		if want := []string{"Bash(rm *)"}; !reflect.DeepEqual(ask, want) {
+			t.Fatalf("disabled=%v: ask = %v, want %v", disabled, ask, want)
 		}
 		if denies(saved, "NotebookEdit") != disabled {
 			t.Fatalf("disabled=%v: deny rule wrong", disabled)
+		}
+		if disabled && !regexp.MustCompile(`removed "NotebookEdit\(secret.ipynb\)" from permissions.ask and "NotebookEdit", .* from permissions.allow`).MatchString(m.status) {
+			t.Fatalf("status = %q", m.status)
 		}
 	}
 }

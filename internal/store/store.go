@@ -91,6 +91,8 @@ func Allowed(st *schema.Setting, scope Scope) bool {
 		return scope == ScopeUser
 	case schema.ScopeUserLocalManaged:
 		return scope == ScopeUser || scope == ScopeLocal
+	case schema.ScopeUser:
+		return scope == ScopeUser
 	default:
 		return scope == ScopeUser || scope == ScopeProject || scope == ScopeLocal
 	}

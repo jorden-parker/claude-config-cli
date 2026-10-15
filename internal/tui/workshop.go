@@ -7,6 +7,8 @@ import "charm.land/lipgloss/v2"
 // receipts always take priority.
 func (m *model) workshopHint() string {
 	switch {
+	case m.stale && m.mode == modeBrowse && !m.details && m.status == "":
+		return "✧ The catalogue is older than a week · run ccfg sync to list today's settings"
 	case m.details:
 		return "✧ A closer look. PgUp/PgDn scroll · ctrl+d returns to settings."
 	case m.mode == modeHelp:

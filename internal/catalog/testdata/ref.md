@@ -35,6 +35,7 @@ return <div className="not-prose">
         @media (max-width: 1279px) { .bti-btn { bottom: 112px; } }
         @media print { .bti-btn { display: none; } }
       `}</style>
+
 <a className={'bti-btn' + (show ? ' bti-show' : '')} href={href} aria-hidden={!show} tabIndex={show ? 0 : -1}>
 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" /></svg>
 {label}

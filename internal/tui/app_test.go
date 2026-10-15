@@ -497,3 +497,45 @@ func TestSearchHighlightsShownName(t *testing.T) {
 	}
 	t.Fatal("Separator row not found for sep")
 }
+
+func TestStatusLineHintsStaleCatalogue(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := newModel(t.TempDir())
+	m.width = 160
+	m.stale = true
+	if got := ansi.Strip(m.statusLine()); !strings.Contains(got, "ccfg sync") {
+		t.Fatalf("status = %q", got)
+	}
+	m.stale = false
+	if got := ansi.Strip(m.statusLine()); strings.Contains(got, "ccfg sync") {
+		t.Fatalf("status = %q", got)
+	}
+}
+
+func TestSaveValueReconcilesPermissionLists(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cwd := t.TempDir()
+	m := newModel(cwd)
+	f := m.files[store.ScopeUser]
+	f.Set("permissions.allow", []any{"Bash(npm *)", "Read"})
+	st := m.sch.Get("permissions.deny")
+	m.saveValue(st, f, []string{"Bash", "Bash"})
+	if m.statusErr || !strings.Contains(m.status, `removed "Bash(npm *)" from permissions.allow`) {
+		t.Fatalf("status = %q (err=%v)", m.status, m.statusErr)
+	}
+	saved, err := store.Open(store.ScopeUser, cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := saved.Get("permissions.allow"); !reflect.DeepEqual(v, []any{"Read"}) {
+		t.Fatalf("allow = %v", v)
+	}
+	if v, _ := saved.Get("permissions.deny"); !reflect.DeepEqual(v, []any{"Bash"}) {
+		t.Fatalf("deny = %v", v)
+	}
+	// Ordinary keys take the plain path.
+	m.saveValue(m.sch.Get("model"), f, "opus")
+	if v, _ := f.Get("model"); v != "opus" {
+		t.Fatal("model not saved")
+	}
+}
