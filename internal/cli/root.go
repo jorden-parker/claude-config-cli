@@ -78,7 +78,7 @@ Pull up a terminal. Let's tinker.`,
 	root.PersistentFlags().BoolVar(&flagNoCache, "no-cache", false, "ignore the catalogue saved by sync; use the one built in")
 
 	statusline.Program = name
-	root.AddCommand(listCmd(), getCmd(), setCmd(), unsetCmd(), docCmd(), showCmd(), envCmd(), pathsCmd(), statuslineCmd(), snapshotCmd(), restoreCmd(), syncCmd(), checkCmd())
+	root.AddCommand(listCmd(), getCmd(), setCmd(), unsetCmd(), docCmd(), showCmd(), envCmd(), pathsCmd(), statuslineCmd(), snapshotCmd(), restoreCmd(), syncCmd(), checkCmd(), dietCmd())
 	return root
 }
 

@@ -55,7 +55,8 @@ type item struct {
 	val     string // value in effect, compact JSON; empty when unset
 	scope   string // file the value (or the tool's deny rule) comes from
 	tool    bool
-	off     bool // tool is disabled by a deny rule in some file
+	off     bool     // tool is disabled by a deny rule in some file
+	diet    *dietRow // checklist row; nil for every other row
 }
 
 // label is the text shown for the row: its short name, or the full key.
@@ -139,7 +140,7 @@ func newModel(cwd string) *model {
 	m.st = newStyles(true)
 	m.reload()
 	m.sections = append([]string(nil), m.sch.Sections()...)
-	m.sections = append(m.sections, envSection, statusSection)
+	m.sections = append(m.sections, envSection, statusSection, dietSection)
 	if !contains(m.sections, toolsSection) {
 		m.sections = append(m.sections, toolsSection)
 	}
@@ -423,6 +424,10 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setStatus("Status line rows change with tab. Nothing to remove.", false)
 				return m, nil
 			}
+			if isDiet(st) && !isDietTrap(st) {
+				m.setStatus("Context diet rows change with enter. Nothing to remove.", false)
+				return m, nil
+			}
 			if st == nil {
 				return m, nil
 			}
@@ -444,6 +449,9 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if isStatus(st) {
 					url = statusline.DocURL
+				}
+				if isDiet(st) {
+					url = m.dietURL()
 				}
 				openURL(url)
 				m.setStatus("Opened docs in your browser: "+url, false)
@@ -582,6 +590,9 @@ func (m *model) startEdit() tea.Cmd {
 	if st == nil {
 		return nil
 	}
+	if isDiet(st) {
+		return m.dietAct()
+	}
 	if toolName(st) != "" {
 		return m.toggleTool(st)
 	}
@@ -610,6 +621,9 @@ func (m *model) cycleValue() tea.Cmd {
 	st := m.selected()
 	if st == nil {
 		return nil
+	}
+	if isDiet(st) {
+		return m.dietAct()
 	}
 	if toolName(st) != "" {
 		return m.toggleTool(st)
@@ -771,6 +785,11 @@ func (m *model) refreshDoc() {
 		m.doc.GotoTop()
 		return
 	}
+	if isDiet(st) {
+		m.doc.SetContent(m.dietDoc(w))
+		m.doc.GotoTop()
+		return
+	}
 	if toolName(st) != "" {
 		m.doc.SetContent(lipgloss.NewStyle().Width(w).Render(m.toolDoc(st, w)))
 		m.doc.GotoTop()
@@ -888,6 +907,8 @@ func (m *model) hints() []hint {
 	}
 	if isStatus(st) {
 		h = append(h, hint{"tab", "change"}, hint{"J K", "reorder"}, hint{"p", "run preview"}, back, hint{"s", "target file"}, hint{"/", "search all"}, hint{"[ ]", "section"})
+	} else if isDiet(st) {
+		h = append(h, hint{"enter", m.dietVerb()}, back, hint{"s", "target file"}, hint{"[ ]", "section"})
 	} else if toolName(st) != "" {
 		h = append(h, hint{"tab", "turn on/off"}, back, hint{"s", "target file"}, hint{"/", "search all"}, hint{"[ ]", "section"})
 	} else if m.onGroup() {
@@ -1019,6 +1040,8 @@ func (m *model) listFooter(width int) string {
 	switch {
 	case l.IsFiltered() && !l.SettingFilter():
 		left = "filter: " + l.FilterValue()
+	case isDiet(m.selected()):
+		left = "✓ applied ○ not yet ▲ warning ◇ info"
 	case toolName(m.selected()) != "":
 		left = "off = listed in permissions.deny"
 	case m.section() == envSection:

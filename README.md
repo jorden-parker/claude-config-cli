@@ -194,6 +194,38 @@ Editors per value kind:
 - **json** (`hooks`, `statusLine`, `sandbox`, ...): a JSON editor pre-filled
   with the docs example; `ctrl+e` opens `$EDITOR`
 
+### Context diet
+
+Open **Context diet** in the section list for a checklist of the settings and
+habits that cut what Claude Code sends as context. Each row shows a state:
+
+- **✓ applied**: in place. The badge names the file it is set in (`user`,
+  `project`, `local`, `managed`, or `global`), or `default` when Claude Code's
+  default already does it.
+- **○ not applied**: not in place yet.
+- **▲ warning**: a trap is set, such as `ENABLE_TOOL_SEARCH=false`. The
+  setting does nothing, or costs more than it saves.
+- **◇ info**: ccfg cannot check it from settings files, such as `/clear` habits.
+
+Each row has a one-line reason under its title. The details pane shows what
+the row does, its caveat, which files set its keys and to what value, and the
+docs page. `o` opens that page.
+
+- **Enter** on a not-applied row writes the change to the target file (`s`
+  changes the target), with the same checks the settings editor uses. Rows
+  where you choose the value, such as effort per model or the list of disabled
+  servers, open the editor for that key instead.
+- **Enter** on an applied row only says that it is applied, and where.
+- **Enter** on a warning row asks before it removes the trap key from the
+  target file. If the trap is in another file, the message names that file.
+- **Enter** on a habit or a check row shows its details.
+
+ccfg reads values the way Claude Code does: managed, then local, project, and
+user, with `~/.claude.json` for global keys. It also counts the lines in
+`CLAUDE.md` and `AGENTS.md`, reads `alwaysLoad` in `.mcp.json` and
+`~/.claude.json`, and reads the `model:` line of subagent files. It never runs
+Claude Code, and it changes only the file you choose.
+
 ## CLI
 
 ```sh
@@ -220,6 +252,7 @@ ccfg restore ~/claude-settings.json    # put them back (--force to replace exist
 ccfg sync                       # refresh the list of settings from the official docs
 ccfg sync --check               # only report what the docs changed (exit 1 on drift)
 ccfg check                      # find permission rules that contradict each other
+ccfg diet                       # the context diet checklist: applied, not applied, traps (--json)
 ```
 
 Scopes: `user` (default), `project`, `local`, `global`.

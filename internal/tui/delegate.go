@@ -34,6 +34,11 @@ func (d rowDelegate) Render(w io.Writer, lm list.Model, index int, li list.Item)
 		return
 	}
 
+	if it.diet != nil {
+		renderDietRow(w, s, width, selected, it)
+		return
+	}
+
 	gutter := "  "
 	keyStyle := s.value
 	if selected {

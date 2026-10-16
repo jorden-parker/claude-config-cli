@@ -21,6 +21,8 @@ func (m *model) workshopHint() string {
 		return "✿ A little care for your variable garden. Enter edits a value."
 	case m.section() == statusSection:
 		return "✧ Build your status line. Tab turns a field on · J/K reorder."
+	case m.section() == dietSection:
+		return "✧ Your context checklist. Enter applies a step, o opens its docs."
 	case m.section() == toolsSection:
 		return "✧ Welcome to the toolbox. Tab turns a tool on or off."
 	case m.onGroup():

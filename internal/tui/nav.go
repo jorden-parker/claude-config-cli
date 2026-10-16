@@ -86,6 +86,9 @@ func (m *model) levelItems() []list.Item {
 	if m.section() == statusSection {
 		return m.statusItems()
 	}
+	if m.section() == dietSection {
+		return m.dietItems()
+	}
 	prefix := m.levelPrefix()
 	parents := m.parents()
 	seen := map[string]bool{}
