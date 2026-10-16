@@ -125,6 +125,10 @@ type model struct {
 	parentSet map[string]bool
 	synthetic map[string]*schema.Setting
 	sl        statusState
+
+	mouseOn  bool      // mouse reporting is on; m toggles it, CCFG_NO_MOUSE=1 starts it off
+	hits     hitMap    // pane rectangles from the last View, for mouse hit tests
+	footHits []footHit // footer hints from the last View
 }
 
 // Run starts the interactive editor.
@@ -137,6 +141,7 @@ func Run(cwd string) error {
 func newModel(cwd string) *model {
 	m := &model{cwd: cwd, sch: schema.Load(), scope: store.ScopeUser, isDark: true}
 	m.stale = m.sch.Stale(time.Now())
+	m.mouseOn = mouseOnFromEnv()
 	m.st = newStyles(true)
 	m.reload()
 	m.sections = append([]string(nil), m.sch.Sections()...)
@@ -292,6 +297,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyStyles()
 		m.refreshDoc()
 		return m, nil
+	case tea.MouseMsg:
+		return m, m.handleMouse(msg)
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
@@ -349,6 +356,9 @@ func (m *model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case k.String() == "ctrl+k":
 			return m, m.openPalette()
+		case k.String() == "m":
+			m.toggleMouse()
+			return m, nil
 		case key.Matches(k, keys.quit):
 			return m, tea.Quit
 		case key.Matches(k, keys.help):
@@ -938,6 +948,7 @@ func cyclable(st *schema.Setting) bool {
 }
 
 // footer fits as many hints as the width allows and always keeps help and quit.
+// It also records where each hint was drawn, so a click on it can run that hint.
 func (m *model) footer() string {
 	render := func(h hint) string { return m.st.keyCap.Render(h.key) + " " + m.st.subtle.Render(h.desc) }
 	tail := []hint{{"ctrl+k", "explore"}, {"?", "all keys"}, {"q", "quit"}}
@@ -950,6 +961,7 @@ func (m *model) footer() string {
 	}
 	tailView := strings.Join(tailParts, "   ")
 	var parts []string
+	var shown []hint
 	used := lipgloss.Width(tailView)
 	for _, h := range m.hints() {
 		r := render(h)
@@ -957,13 +969,28 @@ func (m *model) footer() string {
 			break
 		}
 		parts = append(parts, r)
+		shown = append(shown, h)
 		used += lipgloss.Width(r) + 3
 	}
 	left := " " + strings.Join(parts, "   ")
+	m.footHits = m.footHits[:0]
+	x := 1
+	for i, h := range shown {
+		w := lipgloss.Width(parts[i])
+		m.footHits = append(m.footHits, footHit{x0: x, x1: x + w, hint: h})
+		x += w + 3
+	}
 	if tailView == "" {
 		return left
 	}
-	return left + strings.Repeat(" ", max(3, m.width-lipgloss.Width(left)-lipgloss.Width(tailView)-1)) + tailView
+	gap := max(3, m.width-lipgloss.Width(left)-lipgloss.Width(tailView)-1)
+	x = lipgloss.Width(left) + gap
+	for i, h := range tail {
+		w := lipgloss.Width(tailParts[i])
+		m.footHits = append(m.footHits, footHit{x0: x, x1: x + w, hint: h})
+		x += w + 3
+	}
+	return left + strings.Repeat(" ", gap) + tailView
 }
 
 func (m *model) header() string {
@@ -1065,7 +1092,7 @@ func (m *model) keysOverlay() string {
 	}{
 		{"Move", []hint{{"↑ ↓  j k", "move up and down"}, {"[ ]", "previous or next section"}, {"← →", "move between sections and their keys"}, {"enter", "open a group such as permissions"}, {"esc ←", "go back out of a group"}, {"/", "search every key in every section"}, {"pgup pgdn", "scroll the details"}}},
 		{"Change", []hint{{"enter", "edit the setting, or turn a tool on or off"}, {"tab", "next value, or turn the tool on or off"}, {"u", "remove the key from the target file"}, {"s / S", "switch the target file / open file picker"}, {"J K", "status line: move a field later or earlier"}, {"p", "status line: run the existing command for the preview"}}},
-		{"Other", []hint{{"ctrl+k", "jump to a section or discover a setting"}, {"ctrl+d", "expand details / return to settings"}, {"o", "open the docs page in your browser"}, {"r", "reload the settings files from disk"}, {"q", "quit"}}},
+		{"Other", []hint{{"ctrl+k", "jump to a section or discover a setting"}, {"ctrl+d", "expand details / return to settings"}, {"o", "open the docs page in your browser"}, {"r", "reload the settings files from disk"}, {"m", "mouse on or off (off lets you select text)"}, {"q", "quit"}}},
 	}
 	var b strings.Builder
 	for i, g := range groups {
@@ -1090,6 +1117,8 @@ func (m *model) keysOverlay() string {
 func (m *model) View() tea.View {
 	v := tea.NewView("")
 	v.AltScreen = true
+	v.MouseMode = m.mouseMode()
+	m.hits, m.footHits = hitMap{}, nil
 	if m.width == 0 {
 		v.SetContent("˙ᵕ˙ Opening the settings workshop…")
 		return v
@@ -1113,6 +1142,8 @@ func (m *model) View() tea.View {
 		return v
 	}
 
+	hdr := m.header()
+	top := lipgloss.Height(hdr)
 	bodyHeight := m.height - chromeRows
 	var body string
 	if m.mode == modeConfirmUnset && m.selected() != nil {
@@ -1126,6 +1157,7 @@ func (m *model) View() tea.View {
 		body = lipgloss.Place(m.width, bodyHeight, lipgloss.Center, lipgloss.Center, m.keysOverlay())
 	} else if m.details {
 		body = m.st.paneFocus.Width(m.width).Height(bodyHeight).Render(m.doc.View())
+		m.hits.doc = rect{0, top, m.width, bodyHeight}
 	} else {
 		lw := m.listWidth()
 		sidePane, listPane := m.st.pane, m.st.paneFocus
@@ -1135,22 +1167,32 @@ func (m *model) View() tea.View {
 		side := sidePane.Width(m.sideWidth()).Height(bodyHeight).Render(m.sidebar(m.sideWidth()-4, bodyHeight-2))
 		mid := listPane.Width(lw).Height(bodyHeight).Render(lipgloss.JoinVertical(lipgloss.Left, m.list.View(), m.listFooter(lw-4)))
 		right := m.st.pane.Width(m.doc.Width() + 4).Height(bodyHeight).Render(m.doc.View())
+		// Record where each pane landed, from the widths it rendered at.
 		switch {
 		case m.width < 60:
 			if m.sideFocus {
 				body = sidePane.Width(m.width).Height(bodyHeight).Render(m.sidebar(m.width-4, bodyHeight-2))
+				m.hits.side = rect{0, top, m.width, bodyHeight}
 			} else {
 				body = mid
+				m.hits.list = rect{0, top, lipgloss.Width(mid), bodyHeight}
 			}
 		case m.width < 100:
 			body = lipgloss.JoinHorizontal(lipgloss.Top, side, mid)
+			sw := lipgloss.Width(side)
+			m.hits.side = rect{0, top, sw, bodyHeight}
+			m.hits.list = rect{sw, top, lipgloss.Width(mid), bodyHeight}
 		default:
 			body = lipgloss.JoinHorizontal(lipgloss.Top, side, mid, right)
+			sw, mw := lipgloss.Width(side), lipgloss.Width(mid)
+			m.hits.side = rect{0, top, sw, bodyHeight}
+			m.hits.list = rect{sw, top, mw, bodyHeight}
+			m.hits.doc = rect{sw + mw, top, lipgloss.Width(right), bodyHeight}
 		}
 	}
 	line := lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(1)
 	v.SetContent(lipgloss.JoinVertical(lipgloss.Left,
-		m.header(),
+		hdr,
 		lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(bodyHeight).Render(body),
 		line.Width(m.width).Render(m.statusLine()),
 		line.Render(m.footer()),

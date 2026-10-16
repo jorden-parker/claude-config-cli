@@ -399,6 +399,19 @@ func (m *model) sectionCount(section string) int {
 	return n
 }
 
+// sidebarHead is the heading and blank line above the first section.
+const sidebarHead = 2
+
+// sidebarTop is the first line of the sidebar shown in a pane h rows tall. It
+// keeps the open section visible when the terminal is short.
+func (m *model) sidebarTop(h int) int {
+	n := len(m.sections) + sidebarHead
+	if n <= h {
+		return 0
+	}
+	return min(n-h, max(0, m.sec+sidebarHead-h/2))
+}
+
 // sidebar lists every section; the open one is marked, and a count shows
 // how many of its keys have a value.
 func (m *model) sidebar(w, h int) string {
@@ -421,9 +434,8 @@ func (m *model) sidebar(w, h int) string {
 		gap := max(1, w-2-lipgloss.Width(name)-lipgloss.Width(right))
 		lines = append(lines, gutter+style.Render(name)+strings.Repeat(" ", gap)+right)
 	}
-	// Keep the open section visible when the terminal is short.
 	if len(lines) > h {
-		start := min(len(lines)-h, max(0, m.sec+2-h/2))
+		start := m.sidebarTop(h)
 		lines = lines[start : start+h]
 	}
 	return strings.Join(lines, "\n")

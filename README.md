@@ -72,8 +72,26 @@ ccfg -C ~/repo                  # another project
 | `J` `K`       | status line: move a shown field later or earlier                    |
 | `p`           | status line: run the existing command for the preview               |
 | `r`           | reload the settings files                                           |
+| `m`           | mouse on or off; off lets your terminal select text                 |
 | `?`           | show every key                                                      |
 | `q`           | quit                                                                |
+
+### Mouse
+
+The mouse works in the browse screen, on by default:
+
+- **Wheel** scrolls the pane under the pointer: the sections, the keys, or the
+  details. It moves one section or three keys per notch.
+- **Click a section** to open it. **Click a key row** to select it; click the
+  same row again to act like `enter` (edit, open a group, or toggle a tool).
+- **Click the details pane** to move keyboard focus off the sections.
+- **Click a footer hint** (such as `ctrl+k` or `/`) to run that key.
+- Forms and dialogs ignore the mouse, so Huh inputs and the editor work as
+  before. The field guide ignores clicks but its wheel still scrolls.
+
+Press `m` to turn the mouse off, so your terminal can select and copy text.
+Press `m` again to turn it back on. The status row says which state you are in.
+To start with the mouse off, set `CCFG_NO_MOUSE=1`.
 
 Each section of the reference (Model, Permissions, Sandbox, … Tools) has its
 own pane; pick one from the list on the left. Nested keys such as
